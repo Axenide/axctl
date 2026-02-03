@@ -67,7 +67,6 @@ func (s *Server) watchEvents() {
 			} else if id, ok := e.Payload["id"].(int); ok {
 				s.cache.RemoveWindow(fmt.Sprintf("%d", id))
 			}
-		case ipc.EventWindowFocused:
 		default:
 			s.initCache()
 		}
@@ -103,6 +102,13 @@ func (s *Server) Start() error {
 	}
 }
 
+func (s *Server) resolveID(id string) (string, error) {
+	if id != "" {
+		return id, nil
+	}
+	return s.compositor.ActiveWindow()
+}
+
 func (s *Server) handleConnection(conn net.Conn) {
 	defer conn.Close()
 	dec := json.NewDecoder(conn)
@@ -134,20 +140,22 @@ func (s *Server) handleConnection(conn net.Conn) {
 				Direction string `json:"direction"`
 			}
 			json.Unmarshal(req.Params, &p)
-			err = s.compositor.FocusDirection(p.Direction)
+			err = s.compositor.FocusDir(p.Direction)
 		case "Window.Close":
 			var p struct {
 				ID string `json:"id"`
 			}
 			json.Unmarshal(req.Params, &p)
-			err = s.compositor.CloseWindow(p.ID)
+			id, _ := s.resolveID(p.ID)
+			err = s.compositor.CloseWindow(id)
 		case "Window.Move":
 			var p struct {
 				ID        string `json:"id"`
 				Direction string `json:"direction"`
 			}
 			json.Unmarshal(req.Params, &p)
-			err = s.compositor.MoveWindow(p.ID, p.Direction)
+			id, _ := s.resolveID(p.ID)
+			err = s.compositor.MoveWindow(id, p.Direction)
 		case "Window.Resize":
 			var p struct {
 				ID     string `json:"id"`
@@ -155,47 +163,52 @@ func (s *Server) handleConnection(conn net.Conn) {
 				Height int    `json:"height"`
 			}
 			json.Unmarshal(req.Params, &p)
-			err = s.compositor.ResizeWindow(p.ID, p.Width, p.Height)
+			id, _ := s.resolveID(p.ID)
+			err = s.compositor.ResizeWindow(id, p.Width, p.Height)
 		case "Window.ToggleFloating":
 			var p struct {
 				ID string `json:"id"`
 			}
 			json.Unmarshal(req.Params, &p)
-			err = s.compositor.ToggleFloating(p.ID)
+			id, _ := s.resolveID(p.ID)
+			err = s.compositor.ToggleFloating(id)
 		case "Window.Fullscreen":
 			var p struct {
 				ID    string `json:"id"`
 				State bool   `json:"state"`
 			}
 			json.Unmarshal(req.Params, &p)
-			err = s.compositor.SetFullscreen(p.ID, p.State)
+			id, _ := s.resolveID(p.ID)
+			err = s.compositor.SetFullscreen(id, p.State)
 		case "Window.Maximize":
 			var p struct {
 				ID    string `json:"id"`
 				State bool   `json:"state"`
 			}
 			json.Unmarshal(req.Params, &p)
-			err = s.compositor.SetMaximized(p.ID, p.State)
+			id, _ := s.resolveID(p.ID)
+			err = s.compositor.SetMaximized(id, p.State)
 		case "Window.Pin":
 			var p struct {
 				ID    string `json:"id"`
 				State bool   `json:"state"`
 			}
 			json.Unmarshal(req.Params, &p)
-			err = s.compositor.PinWindow(p.ID, p.State)
-
+			id, _ := s.resolveID(p.ID)
+			err = s.compositor.PinWindow(id, p.State)
 		case "Window.ToggleGroup":
 			var p struct {
 				ID string `json:"id"`
 			}
 			json.Unmarshal(req.Params, &p)
-			err = s.compositor.ToggleGroup(p.ID)
+			id, _ := s.resolveID(p.ID)
+			err = s.compositor.ToggleGroup(id)
 		case "Window.GroupNav":
 			var p struct {
 				Direction string `json:"direction"`
 			}
 			json.Unmarshal(req.Params, &p)
-			err = s.compositor.GroupNavigation(p.Direction)
+			err = s.compositor.GroupNav(p.Direction)
 		case "Window.LayoutProp":
 			var p struct {
 				ID    string `json:"id"`
@@ -203,7 +216,8 @@ func (s *Server) handleConnection(conn net.Conn) {
 				Value string `json:"value"`
 			}
 			json.Unmarshal(req.Params, &p)
-			err = s.compositor.SetLayoutProperty(p.ID, p.Key, p.Value)
+			id, _ := s.resolveID(p.ID)
+			err = s.compositor.SetLayoutProperty(id, p.Key, p.Value)
 
 		case "Workspace.List":
 			result = s.cache.GetWorkspaces()
@@ -219,7 +233,8 @@ func (s *Server) handleConnection(conn net.Conn) {
 				WorkspaceID string `json:"workspace_id"`
 			}
 			json.Unmarshal(req.Params, &p)
-			err = s.compositor.MoveToWorkspace(p.WindowID, p.WorkspaceID)
+			id, _ := s.resolveID(p.WindowID)
+			err = s.compositor.MoveToWorkspace(id, p.WorkspaceID)
 
 		case "Monitor.List":
 			result = s.cache.GetMonitors()
@@ -235,7 +250,8 @@ func (s *Server) handleConnection(conn net.Conn) {
 				MonitorID string `json:"monitor_id"`
 			}
 			json.Unmarshal(req.Params, &p)
-			err = s.compositor.MoveToMonitor(p.WindowID, p.MonitorID)
+			id, _ := s.resolveID(p.WindowID)
+			err = s.compositor.MoveToMonitor(id, p.MonitorID)
 
 		case "Layout.Set":
 			var p struct {

@@ -44,24 +44,24 @@ func usage() {
 	fmt.Println("    list                    List all windows")
 	fmt.Println("    focus <id>              Focus a window")
 	fmt.Println("    focus-dir <l|r|u|d>     Focus in direction")
-	fmt.Println("    close <id>              Close a window")
-	fmt.Println("    move <id> <dir>         Move window")
-	fmt.Println("    resize <id> <w> <h>     Resize window")
-	fmt.Println("    toggle-floating <id>    Toggle floating")
-	fmt.Println("    fullscreen <id> <0|1>   Set fullscreen")
-	fmt.Println("    maximize <id> <0|1>     Set maximized")
-	fmt.Println("    pin <id> <0|1>          Pin window")
-	fmt.Println("    toggle-group <id>       Toggle window group (Hyprland)")
+	fmt.Println("    close [id]              Close a window")
+	fmt.Println("    move <dir> [id]         Move window")
+	fmt.Println("    resize <w> <h> [id]     Resize window")
+	fmt.Println("    toggle-floating [id]    Toggle floating")
+	fmt.Println("    fullscreen <0|1> [id]   Set fullscreen")
+	fmt.Println("    maximize <0|1> [id]     Set maximized")
+	fmt.Println("    pin <0|1> [id]          Pin window")
+	fmt.Println("    toggle-group [id]       Toggle window group (Hyprland)")
 	fmt.Println("    group-nav <f|b>         Navigate group tabs")
-	fmt.Println("    layout-prop <id> <k> <v> Set layout property (Niri/Mango)")
+	fmt.Println("    layout-prop <k> <v> [id] Set layout property (Niri/Mango)")
 	fmt.Println("\n  workspace <action> [args]")
 	fmt.Println("    list                    List all workspaces")
 	fmt.Println("    switch <id>             Switch workspace")
-	fmt.Println("    move-to <win_id> <ws_id> Move window to workspace")
+	fmt.Println("    move-to <ws_id> [win_id] Move window to workspace")
 	fmt.Println("\n  monitor <action> [args]")
 	fmt.Println("    list                    List all monitors")
 	fmt.Println("    focus <id>              Focus monitor")
-	fmt.Println("    move-to <win_id> <mon_id> Move window to monitor")
+	fmt.Println("    move-to <mon_id> [win_id] Move window to monitor")
 	fmt.Println("\n  layout <action> [args]")
 	fmt.Println("    set <name>              Set layout")
 	fmt.Println("\n  config <action> [args]")
@@ -130,37 +130,47 @@ func handleRPC(category string, args []string) {
 			params["id"] = args[1]
 		}
 	case "Window.Move":
+		if len(args) > 1 {
+			params["direction"] = args[1]
+		}
 		if len(args) > 2 {
-			params["id"] = args[1]
-			params["direction"] = args[2]
+			params["id"] = args[2]
 		}
 	case "Window.Resize":
-		if len(args) > 3 {
+		if len(args) > 2 {
 			var w, h int
-			params["id"] = args[1]
-			fmt.Sscanf(args[2], "%d", &w)
-			fmt.Sscanf(args[3], "%d", &h)
+			fmt.Sscanf(args[1], "%d", &w)
+			fmt.Sscanf(args[2], "%d", &h)
 			params["width"] = w
 			params["height"] = h
+		}
+		if len(args) > 3 {
+			params["id"] = args[3]
 		}
 	case "Window.ToggleFloating":
 		if len(args) > 1 {
 			params["id"] = args[1]
 		}
 	case "Window.Fullscreen":
+		if len(args) > 1 {
+			params["state"] = args[1] == "1"
+		}
 		if len(args) > 2 {
-			params["id"] = args[1]
-			params["state"] = args[2] == "1"
+			params["id"] = args[2]
 		}
 	case "Window.Maximize":
+		if len(args) > 1 {
+			params["state"] = args[1] == "1"
+		}
 		if len(args) > 2 {
-			params["id"] = args[1]
-			params["state"] = args[2] == "1"
+			params["id"] = args[2]
 		}
 	case "Window.Pin":
+		if len(args) > 1 {
+			params["state"] = args[1] == "1"
+		}
 		if len(args) > 2 {
-			params["id"] = args[1]
-			params["state"] = args[2] == "1"
+			params["id"] = args[2]
 		}
 	case "Window.ToggleGroup":
 		if len(args) > 1 {
@@ -171,28 +181,34 @@ func handleRPC(category string, args []string) {
 			params["direction"] = args[1]
 		}
 	case "Window.LayoutProp":
+		if len(args) > 2 {
+			params["key"] = args[1]
+			params["value"] = args[2]
+		}
 		if len(args) > 3 {
-			params["id"] = args[1]
-			params["key"] = args[2]
-			params["value"] = args[3]
+			params["id"] = args[3]
 		}
 	case "Workspace.Switch":
 		if len(args) > 1 {
 			params["id"] = args[1]
 		}
 	case "Workspace.MoveTo":
+		if len(args) > 1 {
+			params["workspace_id"] = args[1]
+		}
 		if len(args) > 2 {
-			params["window_id"] = args[1]
-			params["workspace_id"] = args[2]
+			params["window_id"] = args[2]
 		}
 	case "Monitor.Focus":
 		if len(args) > 1 {
 			params["id"] = args[1]
 		}
 	case "Monitor.MoveTo":
+		if len(args) > 1 {
+			params["monitor_id"] = args[1]
+		}
 		if len(args) > 2 {
-			params["window_id"] = args[1]
-			params["monitor_id"] = args[2]
+			params["window_id"] = args[2]
 		}
 	case "Layout.Set":
 		if len(args) > 1 {

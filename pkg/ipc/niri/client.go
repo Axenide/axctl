@@ -118,6 +118,23 @@ func (n *Niri) ListWindows() ([]ipc.Window, error) {
 	return windows, nil
 }
 
+func (n *Niri) ActiveWindow() (string, error) {
+	var niriWindows []struct {
+		ID        int  `json:"id"`
+		IsFocused bool `json:"is_focused"`
+	}
+	err := n.request("Windows", &niriWindows)
+	if err != nil {
+		return "", err
+	}
+	for _, w := range niriWindows {
+		if w.IsFocused {
+			return fmt.Sprintf("%d", w.ID), nil
+		}
+	}
+	return "", nil
+}
+
 func (n *Niri) FocusWindow(id string) error {
 	var idInt int
 	if _, err := fmt.Sscanf(id, "%d", &idInt); err != nil {
@@ -130,7 +147,7 @@ func (n *Niri) FocusWindow(id string) error {
 	}, nil)
 }
 
-func (n *Niri) FocusDirection(direction string) error {
+func (n *Niri) FocusDir(direction string) error {
 	action := ""
 	switch direction {
 	case "l":
@@ -214,7 +231,7 @@ func (n *Niri) ToggleGroup(id string) error {
 	return ipc.ErrNotSupported
 }
 
-func (n *Niri) GroupNavigation(direction string) error {
+func (n *Niri) GroupNav(direction string) error {
 	return ipc.ErrNotSupported
 }
 
@@ -229,9 +246,7 @@ func (n *Niri) SetLayoutProperty(id string, key, value string) error {
 
 	return n.request(map[string]interface{}{
 		"Action": map[string]interface{}{
-			action: map[string]interface{}{
-				"Fixed": value,
-			},
+			action: map[string]interface{}{"Fixed": value},
 		},
 	}, nil)
 }

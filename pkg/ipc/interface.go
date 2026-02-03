@@ -4,8 +4,9 @@ import "fmt"
 
 type Compositor interface {
 	ListWindows() ([]Window, error)
+	ActiveWindow() (string, error)
 	FocusWindow(id string) error
-	FocusDirection(direction string) error
+	FocusDir(direction string) error
 	CloseWindow(id string) error
 	MoveWindow(id string, direction string) error
 	ResizeWindow(id string, width, height int) error
@@ -15,7 +16,7 @@ type Compositor interface {
 	PinWindow(id string, state bool) error
 
 	ToggleGroup(id string) error
-	GroupNavigation(direction string) error
+	GroupNav(direction string) error
 	SetLayoutProperty(id string, key, value string) error
 
 	ListWorkspaces() ([]Workspace, error)

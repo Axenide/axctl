@@ -77,7 +77,7 @@ func (h *Hyprland) ListWindows() ([]ipc.Window, error) {
 	}
 
 	if err := json.Unmarshal([]byte(resp), &clients); err != nil {
-		fmt.Printf("[Hyprland) Unmarshal error: %v | Raw: %s\n", err, resp)
+		fmt.Printf("[Hyprland] Unmarshal error: %v | Raw: %s\n", err, resp)
 		return nil, err
 	}
 
@@ -99,18 +99,36 @@ func (h *Hyprland) ListWindows() ([]ipc.Window, error) {
 	return windows, nil
 }
 
+func (h *Hyprland) ActiveWindow() (string, error) {
+	resp, err := h.dispatch("j/activewindow")
+	if err != nil {
+		return "", err
+	}
+	var active struct {
+		Address string `json:"address"`
+	}
+	if err := json.Unmarshal([]byte(resp), &active); err != nil {
+		return "", err
+	}
+	return active.Address, nil
+}
+
 func (h *Hyprland) FocusWindow(id string) error {
 	_, err := h.dispatch(fmt.Sprintf("dispatch focuswindow address:%s", id))
 	return err
 }
 
-func (h *Hyprland) FocusDirection(direction string) error {
+func (h *Hyprland) FocusDir(direction string) error {
 	_, err := h.dispatch(fmt.Sprintf("dispatch movefocus %s", direction))
 	return err
 }
 
 func (h *Hyprland) CloseWindow(id string) error {
-	_, err := h.dispatch(fmt.Sprintf("dispatch closewindow address:%s", id))
+	target := "address:" + id
+	if id == "" {
+		target = ""
+	}
+	_, err := h.dispatch(fmt.Sprintf("dispatch closewindow %s", target))
 	return err
 }
 
@@ -120,12 +138,20 @@ func (h *Hyprland) MoveWindow(id string, direction string) error {
 }
 
 func (h *Hyprland) ResizeWindow(id string, width, height int) error {
-	_, err := h.dispatch(fmt.Sprintf("dispatch resizewindowpixel exact %d %d,address:%s", width, height, id))
+	target := "address:" + id
+	if id == "" {
+		target = ""
+	}
+	_, err := h.dispatch(fmt.Sprintf("dispatch resizewindowpixel exact %d %d,%s", width, height, target))
 	return err
 }
 
 func (h *Hyprland) ToggleFloating(id string) error {
-	_, err := h.dispatch(fmt.Sprintf("dispatch togglefloating address:%s", id))
+	target := "address:" + id
+	if id == "" {
+		target = ""
+	}
+	_, err := h.dispatch(fmt.Sprintf("dispatch togglefloating %s", target))
 	return err
 }
 
@@ -134,7 +160,8 @@ func (h *Hyprland) SetFullscreen(id string, state bool) error {
 	if state {
 		val = "0"
 	} else {
-		return h.dispatchOneWay("dispatch fullscreen 0")
+		_, err := h.dispatch("dispatch fullscreen 0")
+		return err
 	}
 	_, err := h.dispatch(fmt.Sprintf("dispatch fullscreen %s", val))
 	return err
@@ -154,17 +181,12 @@ func (h *Hyprland) PinWindow(id string, state bool) error {
 	return err
 }
 
-func (h *Hyprland) dispatchOneWay(cmd string) error {
-	_, err := h.dispatch(cmd)
-	return err
-}
-
 func (h *Hyprland) ToggleGroup(id string) error {
 	_, err := h.dispatch("dispatch togglegroup")
 	return err
 }
 
-func (h *Hyprland) GroupNavigation(direction string) error {
+func (h *Hyprland) GroupNav(direction string) error {
 	dir := "f"
 	if direction == "l" || direction == "u" || direction == "b" {
 		dir = "b"
@@ -210,7 +232,11 @@ func (h *Hyprland) SwitchWorkspace(id string) error {
 }
 
 func (h *Hyprland) MoveToWorkspace(windowID, workspaceID string) error {
-	_, err := h.dispatch(fmt.Sprintf("dispatch movetoworkspace %s,address:%s", workspaceID, windowID))
+	target := "address:" + windowID
+	if windowID == "" {
+		target = ""
+	}
+	_, err := h.dispatch(fmt.Sprintf("dispatch movetoworkspace %s,%s", workspaceID, target))
 	return err
 }
 
@@ -257,7 +283,11 @@ func (h *Hyprland) FocusMonitor(id string) error {
 }
 
 func (h *Hyprland) MoveToMonitor(windowID, monitorID string) error {
-	_, err := h.dispatch(fmt.Sprintf("dispatch movewindowmon %s,address:%s", monitorID, windowID))
+	target := "address:" + windowID
+	if windowID == "" {
+		target = ""
+	}
+	_, err := h.dispatch(fmt.Sprintf("dispatch movewindowmon %s,%s", monitorID, target))
 	return err
 }
 

@@ -27,18 +27,6 @@ func New() (*Mangowc, error) {
 	return &Mangowc{socketPath: path}, nil
 }
 
-func (m *Mangowc) getConnection() (net.Conn, error) {
-	if m.conn != nil {
-		return m.conn, nil
-	}
-	conn, err := net.Dial("unix", m.socketPath)
-	if err != nil {
-		return nil, err
-	}
-	m.conn = conn
-	return conn, nil
-}
-
 func (m *Mangowc) command(cmd string) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -87,12 +75,29 @@ func (m *Mangowc) ListWindows() ([]ipc.Window, error) {
 	return windows, nil
 }
 
+func (m *Mangowc) ActiveWindow() (string, error) {
+	resp, err := m.command("getwindows")
+	if err != nil {
+		return "", err
+	}
+	lines := strings.Split(resp, "\n")
+	for _, line := range lines {
+		if strings.Contains(line, "*") {
+			parts := strings.Fields(line)
+			if len(parts) > 0 {
+				return parts[0], nil
+			}
+		}
+	}
+	return "", nil
+}
+
 func (m *Mangowc) FocusWindow(id string) error {
 	_, err := m.command(fmt.Sprintf("dispatch focuswindow %s", id))
 	return err
 }
 
-func (m *Mangowc) FocusDirection(direction string) error {
+func (m *Mangowc) FocusDir(direction string) error {
 	_, err := m.command(fmt.Sprintf("dispatch focusdir %s", direction))
 	return err
 }
@@ -134,7 +139,7 @@ func (m *Mangowc) ToggleGroup(id string) error {
 	return ipc.ErrNotSupported
 }
 
-func (m *Mangowc) GroupNavigation(direction string) error {
+func (m *Mangowc) GroupNav(direction string) error {
 	return ipc.ErrNotSupported
 }
 
