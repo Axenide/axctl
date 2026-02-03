@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"axctl/pkg/ipc"
@@ -24,18 +25,12 @@ func main() {
 	switch os.Args[1] {
 	case "daemon":
 		runDaemon()
-	case "window":
+	case "window", "workspace", "monitor", "layout", "config", "system":
 		if len(os.Args) < 3 {
 			usage()
 			return
 		}
-		handleRPC("Window", os.Args[2:])
-	case "workspace":
-		if len(os.Args) < 3 {
-			usage()
-			return
-		}
-		handleRPC("Workspace", os.Args[2:])
+		handleRPC(os.Args[1], os.Args[2:])
 	default:
 		usage()
 	}
@@ -45,11 +40,31 @@ func usage() {
 	fmt.Println("Usage: axctl <command> <action> [args]")
 	fmt.Println("\nCommands:")
 	fmt.Println("  daemon                    Start the IPC daemon")
-	fmt.Println("  window list               List all windows")
-	fmt.Println("  window focus <id>         Focus a window")
-	fmt.Println("  window close <id>         Close a window")
-	fmt.Println("  workspace list            List all workspaces")
-	fmt.Println("  workspace switch <id>     Switch to a workspace")
+	fmt.Println("\n  window <action> [args]")
+	fmt.Println("    list                    List all windows")
+	fmt.Println("    focus <id>              Focus a window")
+	fmt.Println("    focus-dir <l|r|u|d>     Focus in direction")
+	fmt.Println("    close <id>              Close a window")
+	fmt.Println("    move <id> <dir>         Move window")
+	fmt.Println("    resize <id> <w> <h>     Resize window")
+	fmt.Println("    toggle-floating <id>    Toggle floating")
+	fmt.Println("    fullscreen <id> <0|1>   Set fullscreen")
+	fmt.Println("\n  workspace <action> [args]")
+	fmt.Println("    list                    List all workspaces")
+	fmt.Println("    switch <id>             Switch workspace")
+	fmt.Println("    move-to <win_id> <ws_id> Move window to workspace")
+	fmt.Println("\n  monitor <action> [args]")
+	fmt.Println("    list                    List all monitors")
+	fmt.Println("    focus <id>              Focus monitor")
+	fmt.Println("    move-to <win_id> <mon_id> Move window to monitor")
+	fmt.Println("\n  layout <action> [args]")
+	fmt.Println("    set <name>              Set layout")
+	fmt.Println("\n  config <action> [args]")
+	fmt.Println("    set <key> <value>       Set config key")
+	fmt.Println("    reload                  Reload config")
+	fmt.Println("\n  system <action> [args]")
+	fmt.Println("    execute <cmd>           Execute command")
+	fmt.Println("    exit                    Exit compositor")
 }
 
 func runDaemon() {
@@ -92,11 +107,77 @@ func runDaemon() {
 
 func handleRPC(category string, args []string) {
 	action := args[0]
-	method := fmt.Sprintf("%s.%s", category, capitalize(action))
+	method := fmt.Sprintf("%s.%s", capitalize(category), capitalize(action))
 
 	params := make(map[string]interface{})
-	if len(args) > 1 {
-		params["id"] = args[1]
+
+	switch method {
+	case "Window.Focus":
+		if len(args) > 1 {
+			params["id"] = args[1]
+		}
+	case "Window.FocusDirection":
+		if len(args) > 1 {
+			params["direction"] = args[1]
+		}
+	case "Window.Close":
+		if len(args) > 1 {
+			params["id"] = args[1]
+		}
+	case "Window.Move":
+		if len(args) > 2 {
+			params["id"] = args[1]
+			params["direction"] = args[2]
+		}
+	case "Window.Resize":
+		if len(args) > 3 {
+			var w, h int
+			params["id"] = args[1]
+			fmt.Sscanf(args[2], "%d", &w)
+			fmt.Sscanf(args[3], "%d", &h)
+			params["width"] = w
+			params["height"] = h
+		}
+	case "Window.ToggleFloating":
+		if len(args) > 1 {
+			params["id"] = args[1]
+		}
+	case "Window.SetFullscreen":
+		if len(args) > 2 {
+			params["id"] = args[1]
+			params["state"] = args[2] == "1"
+		}
+	case "Workspace.Switch":
+		if len(args) > 1 {
+			params["id"] = args[1]
+		}
+	case "Workspace.MoveTo":
+		if len(args) > 2 {
+			params["window_id"] = args[1]
+			params["workspace_id"] = args[2]
+		}
+	case "Monitor.Focus":
+		if len(args) > 1 {
+			params["id"] = args[1]
+		}
+	case "Monitor.MoveTo":
+		if len(args) > 2 {
+			params["window_id"] = args[1]
+			params["monitor_id"] = args[2]
+		}
+	case "Layout.Set":
+		if len(args) > 1 {
+			params["name"] = args[1]
+		}
+	case "Config.Set":
+		if len(args) > 2 {
+			params["key"] = args[1]
+			params["value"] = args[2]
+		}
+	case "System.Execute":
+		if len(args) > 1 {
+			params["command"] = args[1]
+		}
 	}
 
 	socketPath := fmt.Sprintf("/tmp/axctl-%d.sock", os.Getuid())
@@ -138,5 +219,11 @@ func capitalize(s string) string {
 	if len(s) == 0 {
 		return ""
 	}
-	return fmt.Sprintf("%c%s", s[0]-32, s[1:])
+	parts := strings.Split(s, "-")
+	for i, p := range parts {
+		if len(p) > 0 {
+			parts[i] = fmt.Sprintf("%c%s", p[0]-32, p[1:])
+		}
+	}
+	return strings.Join(parts, "")
 }

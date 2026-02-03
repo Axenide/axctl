@@ -1,30 +1,46 @@
 package ipc
 
-// Compositor defines the interface for a universal Wayland compositor IPC daemon.
-// Implementations should support Hyprland, Niri, and Mangowc compositors.
+import "fmt"
+
 type Compositor interface {
-	// ListWindows returns all currently open windows.
-	// Returns an error if the compositor cannot be queried.
 	ListWindows() ([]Window, error)
-
-	// FocusWindow brings the window with the given ID into focus.
-	// Returns ErrWindowNotFound if the window does not exist.
 	FocusWindow(id string) error
-
-	// CloseWindow closes the window with the given ID.
-	// Returns ErrWindowNotFound if the window does not exist.
+	FocusDirection(direction string) error
 	CloseWindow(id string) error
+	MoveWindow(id string, direction string) error
+	ResizeWindow(id string, width, height int) error
+	ToggleFloating(id string) error
+	SetFullscreen(id string, state bool) error
 
-	// ListWorkspaces returns all workspaces known to the compositor.
-	// Returns an error if the compositor cannot be queried.
 	ListWorkspaces() ([]Workspace, error)
-
-	// SwitchWorkspace switches to the workspace with the given ID.
-	// Returns ErrWorkspaceNotFound if the workspace does not exist.
 	SwitchWorkspace(id string) error
+	MoveToWorkspace(windowID, workspaceID string) error
 
-	// Subscribe returns a channel that emits compositor events.
-	// The channel should be closed by the implementation when monitoring stops.
-	// Returns an error if the subscription cannot be established.
+	ListMonitors() ([]Monitor, error)
+	FocusMonitor(id string) error
+	MoveToMonitor(windowID, monitorID string) error
+
+	SetLayout(name string) error
+
+	SetConfig(key string, value interface{}) error
+	ReloadConfig() error
+
+	Execute(command string) error
+	Exit() error
+
 	Subscribe() (<-chan Event, error)
 }
+
+type Monitor struct {
+	ID        string
+	Name      string
+	Width     int
+	Height    int
+	Refresh   float64
+	Active    bool
+	Workspace string
+}
+
+var (
+	ErrNotSupported = fmt.Errorf("feature not supported on this compositor")
+)

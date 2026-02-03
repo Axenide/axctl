@@ -56,10 +56,14 @@ func (h *Hyprland) ListWindows() ([]ipc.Window, error) {
 	}
 
 	var clients []struct {
-		Address   string `json:"address"`
-		Title     string `json:"title"`
-		Class     string `json:"class"`
-		Workspace struct {
+		Address    string `json:"address"`
+		Title      string `json:"title"`
+		Class      string `json:"class"`
+		Floating   bool   `json:"floating"`
+		Fullscreen bool   `json:"fullscreen"`
+		At         []int  `json:"at"`
+		Size       []int  `json:"size"`
+		Workspace  struct {
 			ID int `json:"id"`
 		} `json:"workspace"`
 	}
@@ -75,6 +79,12 @@ func (h *Hyprland) ListWindows() ([]ipc.Window, error) {
 			Title:       c.Title,
 			Class:       c.Class,
 			WorkspaceID: fmt.Sprintf("%d", c.Workspace.ID),
+			Floating:    c.Floating,
+			Fullscreen:  c.Fullscreen,
+			X:           c.At[0],
+			Y:           c.At[1],
+			Width:       c.Size[0],
+			Height:      c.Size[1],
 		}
 	}
 	return windows, nil
@@ -85,8 +95,42 @@ func (h *Hyprland) FocusWindow(id string) error {
 	return err
 }
 
+func (h *Hyprland) FocusDirection(direction string) error {
+	mapping := map[string]string{"l": "l", "r": "r", "u": "u", "d": "d"}
+	dir, ok := mapping[direction]
+	if !ok {
+		return fmt.Errorf("invalid direction")
+	}
+	_, err := h.dispatch(fmt.Sprintf("dispatch movefocus %s", dir))
+	return err
+}
+
 func (h *Hyprland) CloseWindow(id string) error {
 	_, err := h.dispatch(fmt.Sprintf("dispatch closewindow address:%s", id))
+	return err
+}
+
+func (h *Hyprland) MoveWindow(id string, direction string) error {
+	_, err := h.dispatch(fmt.Sprintf("dispatch movewindow %s", direction))
+	return err
+}
+
+func (h *Hyprland) ResizeWindow(id string, width, height int) error {
+	_, err := h.dispatch(fmt.Sprintf("dispatch resizewindowpixel exact %d %d,address:%s", width, height, id))
+	return err
+}
+
+func (h *Hyprland) ToggleFloating(id string) error {
+	_, err := h.dispatch(fmt.Sprintf("dispatch togglefloating address:%s", id))
+	return err
+}
+
+func (h *Hyprland) SetFullscreen(id string, state bool) error {
+	val := "0"
+	if state {
+		val = "1"
+	}
+	_, err := h.dispatch(fmt.Sprintf("dispatch fullscreen %s", val))
 	return err
 }
 
@@ -122,6 +166,82 @@ func (h *Hyprland) SwitchWorkspace(id string) error {
 	return err
 }
 
+func (h *Hyprland) MoveToWorkspace(windowID, workspaceID string) error {
+	_, err := h.dispatch(fmt.Sprintf("dispatch movetoworkspace %s,address:%s", workspaceID, windowID))
+	return err
+}
+
+func (h *Hyprland) ListMonitors() ([]ipc.Monitor, error) {
+	resp, err := h.dispatch("j/monitors")
+	if err != nil {
+		return nil, err
+	}
+
+	var monitors []struct {
+		ID              int     `json:"id"`
+		Name            string  `json:"name"`
+		Width           int     `json:"width"`
+		Height          int     `json:"height"`
+		RefreshRate     float64 `json:"refreshRate"`
+		Focused         bool    `json:"focused"`
+		ActiveWorkspace struct {
+			Name string `json:"name"`
+		} `json:"activeWorkspace"`
+	}
+
+	if err := json.Unmarshal([]byte(resp), &monitors); err != nil {
+		return nil, err
+	}
+
+	res := make([]ipc.Monitor, len(monitors))
+	for i, m := range monitors {
+		res[i] = ipc.Monitor{
+			ID:        fmt.Sprintf("%d", m.ID),
+			Name:      m.Name,
+			Width:     m.Width,
+			Height:    m.Height,
+			Refresh:   m.RefreshRate,
+			Active:    m.Focused,
+			Workspace: m.ActiveWorkspace.Name,
+		}
+	}
+	return res, nil
+}
+
+func (h *Hyprland) FocusMonitor(id string) error {
+	_, err := h.dispatch(fmt.Sprintf("dispatch focusmonitor %s", id))
+	return err
+}
+
+func (h *Hyprland) MoveToMonitor(windowID, monitorID string) error {
+	_, err := h.dispatch(fmt.Sprintf("dispatch movewindowmon %s,address:%s", monitorID, windowID))
+	return err
+}
+
+func (h *Hyprland) SetLayout(name string) error {
+	return ipc.ErrNotSupported
+}
+
+func (h *Hyprland) SetConfig(key string, value interface{}) error {
+	_, err := h.dispatch(fmt.Sprintf("keyword %s %v", key, value))
+	return err
+}
+
+func (h *Hyprland) ReloadConfig() error {
+	_, err := h.dispatch("reload")
+	return err
+}
+
+func (h *Hyprland) Execute(command string) error {
+	_, err := h.dispatch(fmt.Sprintf("dispatch exec %s", command))
+	return err
+}
+
+func (h *Hyprland) Exit() error {
+	_, err := h.dispatch("exit")
+	return err
+}
+
 func (h *Hyprland) Subscribe() (<-chan ipc.Event, error) {
 	conn, err := net.Dial("unix", h.getSocketPath(".socket2.sock"))
 	if err != nil {
@@ -148,7 +268,6 @@ func (h *Hyprland) Subscribe() (<-chan ipc.Event, error) {
 			switch parts[0] {
 			case "openwindow":
 				event.Type = ipc.EventWindowCreated
-				// address,workspace,class,title
 				data := strings.SplitN(parts[1], ",", 4)
 				if len(data) >= 4 {
 					event.Window = &ipc.Window{
@@ -163,7 +282,6 @@ func (h *Hyprland) Subscribe() (<-chan ipc.Event, error) {
 				event.Payload["address"] = "0x" + parts[1]
 			case "activewindow":
 				event.Type = ipc.EventWindowFocused
-				// class,title
 				data := strings.SplitN(parts[1], ",", 2)
 				if len(data) >= 2 {
 					event.Payload["class"] = data[0]

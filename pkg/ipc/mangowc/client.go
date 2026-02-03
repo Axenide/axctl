@@ -71,12 +71,37 @@ func (m *Mangowc) ListWindows() ([]ipc.Window, error) {
 }
 
 func (m *Mangowc) FocusWindow(id string) error {
-	_, err := m.command(fmt.Sprintf("focuswindow %s", id))
+	_, err := m.command(fmt.Sprintf("dispatch focuswindow %s", id))
+	return err
+}
+
+func (m *Mangowc) FocusDirection(direction string) error {
+	_, err := m.command(fmt.Sprintf("dispatch focusdir %s", direction))
 	return err
 }
 
 func (m *Mangowc) CloseWindow(id string) error {
-	_, err := m.command(fmt.Sprintf("killclient %s", id))
+	_, err := m.command(fmt.Sprintf("dispatch killclient %s", id))
+	return err
+}
+
+func (m *Mangowc) MoveWindow(id string, direction string) error {
+	_, err := m.command(fmt.Sprintf("dispatch movewin %s", direction))
+	return err
+}
+
+func (m *Mangowc) ResizeWindow(id string, width, height int) error {
+	_, err := m.command(fmt.Sprintf("dispatch resizewin %d,%d", width, height))
+	return err
+}
+
+func (m *Mangowc) ToggleFloating(id string) error {
+	_, err := m.command(fmt.Sprintf("dispatch togglefloating %s", id))
+	return err
+}
+
+func (m *Mangowc) SetFullscreen(id string, state bool) error {
+	_, err := m.command(fmt.Sprintf("dispatch togglefullscreen %s", id))
 	return err
 }
 
@@ -105,7 +130,50 @@ func (m *Mangowc) ListWorkspaces() ([]ipc.Workspace, error) {
 }
 
 func (m *Mangowc) SwitchWorkspace(id string) error {
-	_, err := m.command(fmt.Sprintf("view %s", id))
+	_, err := m.command(fmt.Sprintf("dispatch view %s", id))
+	return err
+}
+
+func (m *Mangowc) MoveToWorkspace(windowID, workspaceID string) error {
+	_, err := m.command(fmt.Sprintf("dispatch tag %s", workspaceID))
+	return err
+}
+
+func (m *Mangowc) ListMonitors() ([]ipc.Monitor, error) {
+	return nil, ipc.ErrNotSupported
+}
+
+func (m *Mangowc) FocusMonitor(id string) error {
+	_, err := m.command(fmt.Sprintf("dispatch focusmon %s", id))
+	return err
+}
+
+func (m *Mangowc) MoveToMonitor(windowID, monitorID string) error {
+	_, err := m.command(fmt.Sprintf("dispatch tagmon %s", monitorID))
+	return err
+}
+
+func (m *Mangowc) SetLayout(name string) error {
+	_, err := m.command(fmt.Sprintf("dispatch switch_layout %s", name))
+	return err
+}
+
+func (m *Mangowc) SetConfig(key string, value interface{}) error {
+	return ipc.ErrNotSupported
+}
+
+func (m *Mangowc) ReloadConfig() error {
+	_, err := m.command("dispatch reload_config")
+	return err
+}
+
+func (m *Mangowc) Execute(command string) error {
+	_, err := m.command(fmt.Sprintf("dispatch spawn %s", command))
+	return err
+}
+
+func (m *Mangowc) Exit() error {
+	_, err := m.command("dispatch quit")
 	return err
 }
 

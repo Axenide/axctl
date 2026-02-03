@@ -1,25 +1,22 @@
 package ipc
 
-// Window represents a window in the compositor.
 type Window struct {
-	// ID is the unique identifier for the window.
-	ID string
-	// Title is the window's title string.
-	Title string
-	// Class is the application class name.
-	Class string
-	// WorkspaceID is the ID of the workspace containing this window.
-	WorkspaceID string
+	ID            string
+	Title         string
+	Class         string
+	WorkspaceID   string
+	Floating      bool
+	Fullscreen    bool
+	X, Y          int
+	Width, Height int
 }
 
-// Workspace represents a workspace in the compositor.
 type Workspace struct {
-	// ID is the unique identifier for the workspace.
-	ID string
-	// Name is the human-readable name of the workspace.
-	Name string
-	// MonitorID is the ID of the monitor displaying this workspace.
+	ID        string
+	Name      string
 	MonitorID string
+	Active    bool
+	Layout    string
 }
 
 // EventType represents the type of event occurring in the compositor.

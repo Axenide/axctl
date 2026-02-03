@@ -63,61 +63,130 @@ func (s *Server) handleConnection(conn net.Conn) {
 
 		fmt.Printf("[Server] Request: %s\n", req.Method)
 		resp := Response{ID: req.ID}
+
+		var err error
+		var result interface{}
+
 		switch req.Method {
 		case "Window.List":
-			windows, err := s.compositor.ListWindows()
-			if err != nil {
-				fmt.Printf("[Server] Error ListWindows: %v\n", err)
-				resp.Error = err.Error()
-			} else {
-				resp.Result = windows
-			}
+			result, err = s.compositor.ListWindows()
 		case "Window.Focus":
-			var params struct {
+			var p struct {
 				ID string `json:"id"`
 			}
-			json.Unmarshal(req.Params, &params)
-			err := s.compositor.FocusWindow(params.ID)
-			if err != nil {
-				resp.Error = err.Error()
-			} else {
-				resp.Result = "ok"
+			json.Unmarshal(req.Params, &p)
+			err = s.compositor.FocusWindow(p.ID)
+		case "Window.FocusDirection":
+			var p struct {
+				Direction string `json:"direction"`
 			}
+			json.Unmarshal(req.Params, &p)
+			err = s.compositor.FocusDirection(p.Direction)
 		case "Window.Close":
-			var params struct {
+			var p struct {
 				ID string `json:"id"`
 			}
-			json.Unmarshal(req.Params, &params)
-			err := s.compositor.CloseWindow(params.ID)
-			if err != nil {
-				resp.Error = err.Error()
-			} else {
-				resp.Result = "ok"
+			json.Unmarshal(req.Params, &p)
+			err = s.compositor.CloseWindow(p.ID)
+		case "Window.Move":
+			var p struct {
+				ID        string `json:"id"`
+				Direction string `json:"direction"`
 			}
+			json.Unmarshal(req.Params, &p)
+			err = s.compositor.MoveWindow(p.ID, p.Direction)
+		case "Window.Resize":
+			var p struct {
+				ID     string `json:"id"`
+				Width  int    `json:"width"`
+				Height int    `json:"height"`
+			}
+			json.Unmarshal(req.Params, &p)
+			err = s.compositor.ResizeWindow(p.ID, p.Width, p.Height)
+		case "Window.ToggleFloating":
+			var p struct {
+				ID string `json:"id"`
+			}
+			json.Unmarshal(req.Params, &p)
+			err = s.compositor.ToggleFloating(p.ID)
+		case "Window.SetFullscreen":
+			var p struct {
+				ID    string `json:"id"`
+				State bool   `json:"state"`
+			}
+			json.Unmarshal(req.Params, &p)
+			err = s.compositor.SetFullscreen(p.ID, p.State)
+
 		case "Workspace.List":
-			workspaces, err := s.compositor.ListWorkspaces()
-			if err != nil {
-				resp.Error = err.Error()
-			} else {
-				resp.Result = workspaces
-			}
+			result, err = s.compositor.ListWorkspaces()
 		case "Workspace.Switch":
-			var params struct {
+			var p struct {
 				ID string `json:"id"`
 			}
-			json.Unmarshal(req.Params, &params)
-			err := s.compositor.SwitchWorkspace(params.ID)
-			if err != nil {
-				resp.Error = err.Error()
-			} else {
-				resp.Result = "ok"
+			json.Unmarshal(req.Params, &p)
+			err = s.compositor.SwitchWorkspace(p.ID)
+		case "Workspace.MoveTo":
+			var p struct {
+				WindowID    string `json:"window_id"`
+				WorkspaceID string `json:"workspace_id"`
 			}
+			json.Unmarshal(req.Params, &p)
+			err = s.compositor.MoveToWorkspace(p.WindowID, p.WorkspaceID)
+
+		case "Monitor.List":
+			result, err = s.compositor.ListMonitors()
+		case "Monitor.Focus":
+			var p struct {
+				ID string `json:"id"`
+			}
+			json.Unmarshal(req.Params, &p)
+			err = s.compositor.FocusMonitor(p.ID)
+		case "Monitor.MoveTo":
+			var p struct {
+				WindowID  string `json:"window_id"`
+				MonitorID string `json:"monitor_id"`
+			}
+			json.Unmarshal(req.Params, &p)
+			err = s.compositor.MoveToMonitor(p.WindowID, p.MonitorID)
+
+		case "Layout.Set":
+			var p struct {
+				Name string `json:"name"`
+			}
+			json.Unmarshal(req.Params, &p)
+			err = s.compositor.SetLayout(p.Name)
+
+		case "Config.Set":
+			var p struct {
+				Key   string      `json:"key"`
+				Value interface{} `json:"value"`
+			}
+			json.Unmarshal(req.Params, &p)
+			err = s.compositor.SetConfig(p.Key, p.Value)
+		case "Config.Reload":
+			err = s.compositor.ReloadConfig()
+
+		case "System.Execute":
+			var p struct {
+				Command string `json:"command"`
+			}
+			json.Unmarshal(req.Params, &p)
+			err = s.compositor.Execute(p.Command)
+		case "System.Exit":
+			err = s.compositor.Exit()
+
 		default:
 			resp.Error = "method not found"
 		}
 
-		if err := enc.Encode(resp); err != nil {
-			fmt.Printf("[Server] Error encoding response: %v\n", err)
+		if err != nil {
+			resp.Error = err.Error()
+		} else if result != nil {
+			resp.Result = result
+		} else {
+			resp.Result = "ok"
 		}
+
+		enc.Encode(resp)
 	}
 }

@@ -56,10 +56,12 @@ func (n *Niri) request(req interface{}, resp interface{}) error {
 
 func (n *Niri) ListWindows() ([]ipc.Window, error) {
 	var niriWindows []struct {
-		ID          int     `json:"id"`
-		Title       *string `json:"title"`
-		AppID       *string `json:"app_id"`
-		WorkspaceID *int    `json:"workspace_id"`
+		ID           int     `json:"id"`
+		Title        *string `json:"title"`
+		AppID        *string `json:"app_id"`
+		WorkspaceID  *int    `json:"workspace_id"`
+		IsFloating   bool    `json:"is_floating"`
+		IsFullscreen bool    `json:"is_fullscreen"`
 	}
 
 	err := n.request("Windows", &niriWindows)
@@ -87,6 +89,8 @@ func (n *Niri) ListWindows() ([]ipc.Window, error) {
 			Title:       title,
 			Class:       class,
 			WorkspaceID: wsID,
+			Floating:    w.IsFloating,
+			Fullscreen:  w.IsFullscreen,
 		}
 	}
 	return windows, nil
@@ -106,25 +110,90 @@ func (n *Niri) FocusWindow(id string) error {
 	}, nil)
 }
 
-func (n *Niri) CloseWindow(id string) error {
-	var idInt int
-	if _, err := fmt.Sscanf(id, "%d", &idInt); err != nil {
-		return err
+func (n *Niri) FocusDirection(direction string) error {
+	action := ""
+	switch direction {
+	case "l":
+		action = "FocusColumnLeft"
+	case "r":
+		action = "FocusColumnRight"
+	case "u":
+		action = "FocusWindowUp"
+	case "d":
+		action = "FocusWindowDown"
+	default:
+		return fmt.Errorf("invalid direction")
 	}
 	return n.request(map[string]interface{}{
 		"Action": map[string]interface{}{
-			"CloseWindow": map[string]interface{}{
-				"id": idInt,
+			action: map[string]interface{}{},
+		},
+	}, nil)
+}
+
+func (n *Niri) CloseWindow(id string) error {
+	return n.request(map[string]interface{}{
+		"Action": map[string]interface{}{
+			"CloseWindow": map[string]interface{}{},
+		},
+	}, nil)
+}
+
+func (n *Niri) MoveWindow(id string, direction string) error {
+	action := ""
+	switch direction {
+	case "l":
+		action = "MoveColumnLeft"
+	case "r":
+		action = "MoveColumnRight"
+	case "u":
+		action = "MoveWindowUp"
+	case "d":
+		action = "MoveWindowDown"
+	default:
+		return fmt.Errorf("invalid direction")
+	}
+	return n.request(map[string]interface{}{
+		"Action": map[string]interface{}{
+			action: map[string]interface{}{},
+		},
+	}, nil)
+}
+
+func (n *Niri) ResizeWindow(id string, width, height int) error {
+	return n.request(map[string]interface{}{
+		"Action": map[string]interface{}{
+			"SetWindowWidth": map[string]interface{}{
+				"width": map[string]interface{}{
+					"Fixed": width,
+				},
 			},
+		},
+	}, nil)
+}
+
+func (n *Niri) ToggleFloating(id string) error {
+	return n.request(map[string]interface{}{
+		"Action": map[string]interface{}{
+			"ToggleWindowFloating": map[string]interface{}{},
+		},
+	}, nil)
+}
+
+func (n *Niri) SetFullscreen(id string, state bool) error {
+	return n.request(map[string]interface{}{
+		"Action": map[string]interface{}{
+			"FullscreenWindow": map[string]interface{}{},
 		},
 	}, nil)
 }
 
 func (n *Niri) ListWorkspaces() ([]ipc.Workspace, error) {
 	var niriWorkspaces []struct {
-		ID     int     `json:"id"`
-		Name   *string `json:"name"`
-		Output *string `json:"output"`
+		ID       int     `json:"id"`
+		Name     *string `json:"name"`
+		Output   *string `json:"output"`
+		IsActive bool    `json:"is_active"`
 	}
 
 	err := n.request("Workspaces", &niriWorkspaces)
@@ -146,23 +215,110 @@ func (n *Niri) ListWorkspaces() ([]ipc.Workspace, error) {
 			ID:        fmt.Sprintf("%d", w.ID),
 			Name:      name,
 			MonitorID: output,
+			Active:    w.IsActive,
 		}
 	}
 	return res, nil
 }
 
 func (n *Niri) SwitchWorkspace(id string) error {
-	var idInt int
-	if _, err := fmt.Sscanf(id, "%d", &idInt); err != nil {
-		return err
-	}
 	return n.request(map[string]interface{}{
 		"Action": map[string]interface{}{
 			"FocusWorkspace": map[string]interface{}{
 				"reference": map[string]interface{}{
-					"Index": idInt,
+					"Name": id,
 				},
 			},
+		},
+	}, nil)
+}
+
+func (n *Niri) MoveToWorkspace(windowID, workspaceID string) error {
+	return n.request(map[string]interface{}{
+		"Action": map[string]interface{}{
+			"MoveWindowToWorkspace": map[string]interface{}{
+				"reference": map[string]interface{}{
+					"Name": workspaceID,
+				},
+			},
+		},
+	}, nil)
+}
+
+func (n *Niri) ListMonitors() ([]ipc.Monitor, error) {
+	var niriOutputs []struct {
+		Name   string `json:"name"`
+		Width  int    `json:"width"`
+		Height int    `json:"height"`
+	}
+	err := n.request("Outputs", &niriOutputs)
+	if err != nil {
+		return nil, err
+	}
+	res := make([]ipc.Monitor, len(niriOutputs))
+	for i, o := range niriOutputs {
+		res[i] = ipc.Monitor{
+			ID:     o.Name,
+			Name:   o.Name,
+			Width:  o.Width,
+			Height: o.Height,
+		}
+	}
+	return res, nil
+}
+
+func (n *Niri) FocusMonitor(id string) error {
+	return n.request(map[string]interface{}{
+		"Action": map[string]interface{}{
+			"FocusMonitor": map[string]interface{}{
+				"name": id,
+			},
+		},
+	}, nil)
+}
+
+func (n *Niri) MoveToMonitor(windowID, monitorID string) error {
+	return n.request(map[string]interface{}{
+		"Action": map[string]interface{}{
+			"MoveWindowToMonitor": map[string]interface{}{
+				"name": monitorID,
+			},
+		},
+	}, nil)
+}
+
+func (n *Niri) SetLayout(name string) error {
+	return n.request(map[string]interface{}{
+		"Action": map[string]interface{}{
+			"SwitchLayout": map[string]interface{}{
+				"name": name,
+			},
+		},
+	}, nil)
+}
+
+func (n *Niri) SetConfig(key string, value interface{}) error {
+	return ipc.ErrNotSupported
+}
+
+func (n *Niri) ReloadConfig() error {
+	return n.request("LoadConfigFile", nil)
+}
+
+func (n *Niri) Execute(command string) error {
+	return n.request(map[string]interface{}{
+		"Action": map[string]interface{}{
+			"Spawn": map[string]interface{}{
+				"command": []string{"sh", "-c", command},
+			},
+		},
+	}, nil)
+}
+
+func (n *Niri) Exit() error {
+	return n.request(map[string]interface{}{
+		"Action": map[string]interface{}{
+			"Quit": map[string]interface{}{},
 		},
 	}, nil)
 }
@@ -190,7 +346,6 @@ func (n *Niri) Subscribe() (<-chan ipc.Event, error) {
 			if err := dec.Decode(&eventWrapper); err != nil {
 				break
 			}
-
 			ch <- ipc.Event{
 				Type: ipc.EventWorkspaceChanged,
 			}
