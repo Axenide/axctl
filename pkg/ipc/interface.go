@@ -11,6 +11,8 @@ type Compositor interface {
 	ResizeWindow(id string, width, height int) error
 	ToggleFloating(id string) error
 	SetFullscreen(id string, state bool) error
+	SetMaximized(id string, state bool) error
+	PinWindow(id string, state bool) error
 
 	ToggleGroup(id string) error
 	GroupNavigation(direction string) error

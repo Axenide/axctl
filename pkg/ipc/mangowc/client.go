@@ -122,6 +122,14 @@ func (m *Mangowc) SetFullscreen(id string, state bool) error {
 	return err
 }
 
+func (m *Mangowc) SetMaximized(id string, state bool) error {
+	return ipc.ErrNotSupported
+}
+
+func (m *Mangowc) PinWindow(id string, state bool) error {
+	return ipc.ErrNotSupported
+}
+
 func (m *Mangowc) ToggleGroup(id string) error {
 	return ipc.ErrNotSupported
 }

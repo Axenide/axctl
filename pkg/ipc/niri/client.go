@@ -196,6 +196,20 @@ func (n *Niri) SetFullscreen(id string, state bool) error {
 	}, nil)
 }
 
+func (n *Niri) SetMaximized(id string, state bool) error {
+	action := "MaximizeWindow"
+	if !state {
+		action = "UnmaximizeWindow"
+	}
+	return n.request(map[string]interface{}{
+		"Action": map[string]interface{}{action: map[string]interface{}{}},
+	}, nil)
+}
+
+func (n *Niri) PinWindow(id string, state bool) error {
+	return ipc.ErrNotSupported
+}
+
 func (n *Niri) ToggleGroup(id string) error {
 	return ipc.ErrNotSupported
 }

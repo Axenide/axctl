@@ -55,10 +55,22 @@ func (s *Server) watchEvents() {
 		return
 	}
 
-	for range events {
-		// For now, on any event, we refresh the full cache.
-		// In a more advanced implementation, we would update only the changed part.
-		s.initCache()
+	for e := range events {
+		switch e.Type {
+		case ipc.EventWindowCreated:
+			if e.Window != nil {
+				s.cache.AddWindow(*e.Window)
+			}
+		case ipc.EventWindowClosed:
+			if id, ok := e.Payload["address"].(string); ok {
+				s.cache.RemoveWindow(id)
+			} else if id, ok := e.Payload["id"].(int); ok {
+				s.cache.RemoveWindow(fmt.Sprintf("%d", id))
+			}
+		case ipc.EventWindowFocused:
+		default:
+			s.initCache()
+		}
 	}
 }
 
@@ -157,6 +169,20 @@ func (s *Server) handleConnection(conn net.Conn) {
 			}
 			json.Unmarshal(req.Params, &p)
 			err = s.compositor.SetFullscreen(p.ID, p.State)
+		case "Window.SetMaximized":
+			var p struct {
+				ID    string `json:"id"`
+				State bool   `json:"state"`
+			}
+			json.Unmarshal(req.Params, &p)
+			err = s.compositor.SetMaximized(p.ID, p.State)
+		case "Window.Pin":
+			var p struct {
+				ID    string `json:"id"`
+				State bool   `json:"state"`
+			}
+			json.Unmarshal(req.Params, &p)
+			err = s.compositor.PinWindow(p.ID, p.State)
 
 		case "Window.ToggleGroup":
 			var p struct {

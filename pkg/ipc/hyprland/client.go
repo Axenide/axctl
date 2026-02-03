@@ -77,7 +77,7 @@ func (h *Hyprland) ListWindows() ([]ipc.Window, error) {
 	}
 
 	if err := json.Unmarshal([]byte(resp), &clients); err != nil {
-		fmt.Printf("[Hyprland] Unmarshal error: %v | Raw: %s\n", err, resp)
+		fmt.Printf("[Hyprland) Unmarshal error: %v | Raw: %s\n", err, resp)
 		return nil, err
 	}
 
@@ -132,9 +132,30 @@ func (h *Hyprland) ToggleFloating(id string) error {
 func (h *Hyprland) SetFullscreen(id string, state bool) error {
 	val := "0"
 	if state {
+		val = "0"
+	} else {
+		return h.dispatchOneWay("dispatch fullscreen 0")
+	}
+	_, err := h.dispatch(fmt.Sprintf("dispatch fullscreen %s", val))
+	return err
+}
+
+func (h *Hyprland) SetMaximized(id string, state bool) error {
+	val := "0"
+	if state {
 		val = "1"
 	}
 	_, err := h.dispatch(fmt.Sprintf("dispatch fullscreen %s", val))
+	return err
+}
+
+func (h *Hyprland) PinWindow(id string, state bool) error {
+	_, err := h.dispatch("dispatch pin")
+	return err
+}
+
+func (h *Hyprland) dispatchOneWay(cmd string) error {
+	_, err := h.dispatch(cmd)
 	return err
 }
 
