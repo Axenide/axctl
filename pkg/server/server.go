@@ -129,7 +129,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 			}
 			json.Unmarshal(req.Params, &p)
 			err = s.compositor.FocusWindow(p.ID)
-		case "Window.FocusDirection":
+		case "Window.FocusDir":
 			var p struct {
 				Direction string `json:"direction"`
 			}
@@ -162,14 +162,14 @@ func (s *Server) handleConnection(conn net.Conn) {
 			}
 			json.Unmarshal(req.Params, &p)
 			err = s.compositor.ToggleFloating(p.ID)
-		case "Window.SetFullscreen":
+		case "Window.Fullscreen":
 			var p struct {
 				ID    string `json:"id"`
 				State bool   `json:"state"`
 			}
 			json.Unmarshal(req.Params, &p)
 			err = s.compositor.SetFullscreen(p.ID, p.State)
-		case "Window.SetMaximized":
+		case "Window.Maximize":
 			var p struct {
 				ID    string `json:"id"`
 				State bool   `json:"state"`
@@ -190,13 +190,13 @@ func (s *Server) handleConnection(conn net.Conn) {
 			}
 			json.Unmarshal(req.Params, &p)
 			err = s.compositor.ToggleGroup(p.ID)
-		case "Window.GroupNavigation":
+		case "Window.GroupNav":
 			var p struct {
 				Direction string `json:"direction"`
 			}
 			json.Unmarshal(req.Params, &p)
 			err = s.compositor.GroupNavigation(p.Direction)
-		case "Window.SetLayoutProperty":
+		case "Window.LayoutProp":
 			var p struct {
 				ID    string `json:"id"`
 				Key   string `json:"key"`

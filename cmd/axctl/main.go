@@ -121,7 +121,7 @@ func handleRPC(category string, args []string) {
 		if len(args) > 1 {
 			params["id"] = args[1]
 		}
-	case "Window.FocusDirection":
+	case "Window.FocusDir":
 		if len(args) > 1 {
 			params["direction"] = args[1]
 		}
@@ -147,12 +147,12 @@ func handleRPC(category string, args []string) {
 		if len(args) > 1 {
 			params["id"] = args[1]
 		}
-	case "Window.SetFullscreen":
+	case "Window.Fullscreen":
 		if len(args) > 2 {
 			params["id"] = args[1]
 			params["state"] = args[2] == "1"
 		}
-	case "Window.SetMaximized":
+	case "Window.Maximize":
 		if len(args) > 2 {
 			params["id"] = args[1]
 			params["state"] = args[2] == "1"
@@ -166,11 +166,11 @@ func handleRPC(category string, args []string) {
 		if len(args) > 1 {
 			params["id"] = args[1]
 		}
-	case "Window.GroupNavigation":
+	case "Window.GroupNav":
 		if len(args) > 1 {
 			params["direction"] = args[1]
 		}
-	case "Window.SetLayoutProperty":
+	case "Window.LayoutProp":
 		if len(args) > 3 {
 			params["id"] = args[1]
 			params["key"] = args[2]
