@@ -262,7 +262,8 @@ func (h *Hyprland) MoveToMonitor(windowID, monitorID string) error {
 }
 
 func (h *Hyprland) SetLayout(name string) error {
-	return ipc.ErrNotSupported
+	_, err := h.dispatch(fmt.Sprintf("keyword general:layout %s", name))
+	return err
 }
 
 func (h *Hyprland) SetConfig(key string, value interface{}) error {
