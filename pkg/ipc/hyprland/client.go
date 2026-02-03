@@ -305,6 +305,9 @@ func (h *Hyprland) SetConfig(key string, value interface{}) error {
 		"border.inactive_color": "general:col.inactive_border",
 		"opacity.active":        "decoration:active_opacity",
 		"opacity.inactive":      "decoration:inactive_opacity",
+		"blur.enabled":          "decoration:blur:enabled",
+		"blur.size":             "decoration:blur:size",
+		"blur.passes":           "decoration:blur:passes",
 	}
 
 	hyprKey, ok := mapping[key]

@@ -218,6 +218,18 @@ func (m *Mangowc) SetConfig(key string, value interface{}) error {
 		m.command(fmt.Sprintf("setoption focused_opacity %v", value))
 	case "opacity.inactive":
 		m.command(fmt.Sprintf("setoption unfocused_opacity %v", value))
+	case "blur.enabled":
+		m.command(fmt.Sprintf("setoption blur %v", value))
+	case "blur.size":
+		m.command(fmt.Sprintf("setoption blur_params_radius %v", value))
+	case "blur.passes":
+		m.command(fmt.Sprintf("setoption blur_params_num_passes %v", value))
+	case "blur.brightness":
+		m.command(fmt.Sprintf("setoption blur_params_brightness %v", value))
+	case "blur.contrast":
+		m.command(fmt.Sprintf("setoption blur_params_contrast %v", value))
+	case "blur.saturation":
+		m.command(fmt.Sprintf("setoption blur_params_saturation %v", value))
 	default:
 		return ipc.ErrNotSupported
 	}
