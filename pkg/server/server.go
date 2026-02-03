@@ -12,12 +12,53 @@ import (
 type Server struct {
 	compositor ipc.Compositor
 	socketPath string
+	cache      *ipc.StateCache
 }
 
 func New(c ipc.Compositor, path string) *Server {
-	return &Server{
+	s := &Server{
 		compositor: c,
 		socketPath: path,
+		cache:      ipc.NewStateCache(),
+	}
+	s.initCache()
+	go s.watchEvents()
+	return s
+}
+
+func (s *Server) initCache() {
+	w, err := s.compositor.ListWindows()
+	if err == nil {
+		fmt.Printf("[Server] Cached %d windows\n", len(w))
+		s.cache.SetWindows(w)
+	} else {
+		fmt.Printf("[Server] Error caching windows: %v\n", err)
+	}
+
+	ws, err := s.compositor.ListWorkspaces()
+	if err == nil {
+		fmt.Printf("[Server] Cached %d workspaces\n", len(ws))
+		s.cache.SetWorkspaces(ws)
+	}
+
+	m, err := s.compositor.ListMonitors()
+	if err == nil {
+		fmt.Printf("[Server] Cached %d monitors\n", len(m))
+		s.cache.SetMonitors(m)
+	}
+}
+
+func (s *Server) watchEvents() {
+	events, err := s.compositor.Subscribe()
+	if err != nil {
+		fmt.Printf("[Server] Error subscribing to events: %v\n", err)
+		return
+	}
+
+	for range events {
+		// For now, on any event, we refresh the full cache.
+		// In a more advanced implementation, we would update only the changed part.
+		s.initCache()
 	}
 }
 
@@ -69,7 +110,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 
 		switch req.Method {
 		case "Window.List":
-			result, err = s.compositor.ListWindows()
+			result = s.cache.GetWindows()
 		case "Window.Focus":
 			var p struct {
 				ID string `json:"id"`
@@ -118,7 +159,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 			err = s.compositor.SetFullscreen(p.ID, p.State)
 
 		case "Workspace.List":
-			result, err = s.compositor.ListWorkspaces()
+			result = s.cache.GetWorkspaces()
 		case "Workspace.Switch":
 			var p struct {
 				ID string `json:"id"`
@@ -134,7 +175,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 			err = s.compositor.MoveToWorkspace(p.WindowID, p.WorkspaceID)
 
 		case "Monitor.List":
-			result, err = s.compositor.ListMonitors()
+			result = s.cache.GetMonitors()
 		case "Monitor.Focus":
 			var p struct {
 				ID string `json:"id"`

@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"axctl/pkg/ipc"
@@ -15,6 +16,7 @@ import (
 
 type Hyprland struct {
 	signature string
+	mu        sync.Mutex
 }
 
 func New() (*Hyprland, error) {
@@ -31,14 +33,16 @@ func (h *Hyprland) getSocketPath(socketName string) string {
 }
 
 func (h *Hyprland) dispatch(cmd string) (string, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
 	conn, err := net.Dial("unix", h.getSocketPath(".socket.sock"))
 	if err != nil {
 		return "", err
 	}
 	defer conn.Close()
 
-	_, err = conn.Write([]byte(cmd))
-	if err != nil {
+	if _, err := conn.Write([]byte(cmd)); err != nil {
 		return "", err
 	}
 
@@ -55,12 +59,16 @@ func (h *Hyprland) ListWindows() ([]ipc.Window, error) {
 		return nil, err
 	}
 
+	if resp == "" || resp == "[]" {
+		return []ipc.Window{}, nil
+	}
+
 	var clients []struct {
 		Address    string `json:"address"`
 		Title      string `json:"title"`
 		Class      string `json:"class"`
 		Floating   bool   `json:"floating"`
-		Fullscreen bool   `json:"fullscreen"`
+		Fullscreen int    `json:"fullscreen"`
 		At         []int  `json:"at"`
 		Size       []int  `json:"size"`
 		Workspace  struct {
@@ -69,6 +77,7 @@ func (h *Hyprland) ListWindows() ([]ipc.Window, error) {
 	}
 
 	if err := json.Unmarshal([]byte(resp), &clients); err != nil {
+		fmt.Printf("[Hyprland] Unmarshal error: %v | Raw: %s\n", err, resp)
 		return nil, err
 	}
 
@@ -80,7 +89,7 @@ func (h *Hyprland) ListWindows() ([]ipc.Window, error) {
 			Class:       c.Class,
 			WorkspaceID: fmt.Sprintf("%d", c.Workspace.ID),
 			Floating:    c.Floating,
-			Fullscreen:  c.Fullscreen,
+			Fullscreen:  c.Fullscreen != 0,
 			X:           c.At[0],
 			Y:           c.At[1],
 			Width:       c.Size[0],
@@ -96,12 +105,7 @@ func (h *Hyprland) FocusWindow(id string) error {
 }
 
 func (h *Hyprland) FocusDirection(direction string) error {
-	mapping := map[string]string{"l": "l", "r": "r", "u": "u", "d": "d"}
-	dir, ok := mapping[direction]
-	if !ok {
-		return fmt.Errorf("invalid direction")
-	}
-	_, err := h.dispatch(fmt.Sprintf("dispatch movefocus %s", dir))
+	_, err := h.dispatch(fmt.Sprintf("dispatch movefocus %s", direction))
 	return err
 }
 
@@ -223,7 +227,22 @@ func (h *Hyprland) SetLayout(name string) error {
 }
 
 func (h *Hyprland) SetConfig(key string, value interface{}) error {
-	_, err := h.dispatch(fmt.Sprintf("keyword %s %v", key, value))
+	mapping := map[string]string{
+		"gaps.inner":            "general:gaps_in",
+		"gaps.outer":            "general:gaps_out",
+		"border.width":          "general:border_size",
+		"border.active_color":   "general:col.active_border",
+		"border.inactive_color": "general:col.inactive_border",
+		"opacity.active":        "decoration:active_opacity",
+		"opacity.inactive":      "decoration:inactive_opacity",
+	}
+
+	hyprKey, ok := mapping[key]
+	if !ok {
+		hyprKey = key
+	}
+
+	_, err := h.dispatch(fmt.Sprintf("keyword %s %v", hyprKey, value))
 	return err
 }
 
@@ -290,9 +309,28 @@ func (h *Hyprland) Subscribe() (<-chan ipc.Event, error) {
 			case "workspace":
 				event.Type = ipc.EventWorkspaceChanged
 				event.Payload["name"] = parts[1]
+			case "movewindow":
+				data := strings.SplitN(parts[1], ",", 2)
+				if len(data) >= 2 {
+					event.Type = ipc.EventWindowCreated
+					event.Payload["address"] = "0x" + data[0]
+					event.Payload["workspace"] = data[1]
+				}
+			case "floating":
+				data := strings.SplitN(parts[1], ",", 2)
+				if len(data) >= 2 {
+					event.Payload["address"] = "0x" + data[0]
+					event.Payload["floating"] = data[1] == "1"
+				}
+			case "fullscreen":
+				event.Payload["fullscreen"] = parts[1] == "1"
+			case "monitoradded":
+				event.Payload["monitor"] = parts[1]
+			case "monitorremoved":
+				event.Payload["monitor"] = parts[1]
 			}
 
-			if event.Type != "" {
+			if event.Type != "" || len(event.Payload) > 0 {
 				ch <- event
 			}
 		}

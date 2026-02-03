@@ -5,12 +5,16 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"sync"
+	"time"
 
 	"axctl/pkg/ipc"
 )
 
 type Niri struct {
 	socketPath string
+	mu         sync.Mutex
+	conn       net.Conn
 }
 
 func New() (*Niri, error) {
@@ -21,14 +25,30 @@ func New() (*Niri, error) {
 	return &Niri{socketPath: path}, nil
 }
 
-func (n *Niri) request(req interface{}, resp interface{}) error {
+func (n *Niri) getConnection() (net.Conn, error) {
+	if n.conn != nil {
+		return n.conn, nil
+	}
 	conn, err := net.Dial("unix", n.socketPath)
+	if err != nil {
+		return nil, err
+	}
+	n.conn = conn
+	return conn, nil
+}
+
+func (n *Niri) request(req interface{}, resp interface{}) error {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	conn, err := n.getConnection()
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
 
 	if err := json.NewEncoder(conn).Encode(req); err != nil {
+		n.conn.Close()
+		n.conn = nil
 		return err
 	}
 
@@ -40,6 +60,8 @@ func (n *Niri) request(req interface{}, resp interface{}) error {
 	}
 
 	if err := json.NewDecoder(conn).Decode(&reply); err != nil {
+		n.conn.Close()
+		n.conn = nil
 		return err
 	}
 
@@ -103,9 +125,7 @@ func (n *Niri) FocusWindow(id string) error {
 	}
 	return n.request(map[string]interface{}{
 		"Action": map[string]interface{}{
-			"FocusWindow": map[string]interface{}{
-				"id": idInt,
-			},
+			"FocusWindow": map[string]interface{}{"id": idInt},
 		},
 	}, nil)
 }
@@ -125,17 +145,13 @@ func (n *Niri) FocusDirection(direction string) error {
 		return fmt.Errorf("invalid direction")
 	}
 	return n.request(map[string]interface{}{
-		"Action": map[string]interface{}{
-			action: map[string]interface{}{},
-		},
+		"Action": map[string]interface{}{action: map[string]interface{}{}},
 	}, nil)
 }
 
 func (n *Niri) CloseWindow(id string) error {
 	return n.request(map[string]interface{}{
-		"Action": map[string]interface{}{
-			"CloseWindow": map[string]interface{}{},
-		},
+		"Action": map[string]interface{}{"CloseWindow": map[string]interface{}{}},
 	}, nil)
 }
 
@@ -154,9 +170,7 @@ func (n *Niri) MoveWindow(id string, direction string) error {
 		return fmt.Errorf("invalid direction")
 	}
 	return n.request(map[string]interface{}{
-		"Action": map[string]interface{}{
-			action: map[string]interface{}{},
-		},
+		"Action": map[string]interface{}{action: map[string]interface{}{}},
 	}, nil)
 }
 
@@ -164,9 +178,7 @@ func (n *Niri) ResizeWindow(id string, width, height int) error {
 	return n.request(map[string]interface{}{
 		"Action": map[string]interface{}{
 			"SetWindowWidth": map[string]interface{}{
-				"width": map[string]interface{}{
-					"Fixed": width,
-				},
+				"width": map[string]interface{}{"Fixed": width},
 			},
 		},
 	}, nil)
@@ -174,17 +186,13 @@ func (n *Niri) ResizeWindow(id string, width, height int) error {
 
 func (n *Niri) ToggleFloating(id string) error {
 	return n.request(map[string]interface{}{
-		"Action": map[string]interface{}{
-			"ToggleWindowFloating": map[string]interface{}{},
-		},
+		"Action": map[string]interface{}{"ToggleWindowFloating": map[string]interface{}{}},
 	}, nil)
 }
 
 func (n *Niri) SetFullscreen(id string, state bool) error {
 	return n.request(map[string]interface{}{
-		"Action": map[string]interface{}{
-			"FullscreenWindow": map[string]interface{}{},
-		},
+		"Action": map[string]interface{}{"FullscreenWindow": map[string]interface{}{}},
 	}, nil)
 }
 
@@ -225,9 +233,7 @@ func (n *Niri) SwitchWorkspace(id string) error {
 	return n.request(map[string]interface{}{
 		"Action": map[string]interface{}{
 			"FocusWorkspace": map[string]interface{}{
-				"reference": map[string]interface{}{
-					"Name": id,
-				},
+				"reference": map[string]interface{}{"Name": id},
 			},
 		},
 	}, nil)
@@ -237,9 +243,7 @@ func (n *Niri) MoveToWorkspace(windowID, workspaceID string) error {
 	return n.request(map[string]interface{}{
 		"Action": map[string]interface{}{
 			"MoveWindowToWorkspace": map[string]interface{}{
-				"reference": map[string]interface{}{
-					"Name": workspaceID,
-				},
+				"reference": map[string]interface{}{"Name": workspaceID},
 			},
 		},
 	}, nil)
@@ -269,31 +273,19 @@ func (n *Niri) ListMonitors() ([]ipc.Monitor, error) {
 
 func (n *Niri) FocusMonitor(id string) error {
 	return n.request(map[string]interface{}{
-		"Action": map[string]interface{}{
-			"FocusMonitor": map[string]interface{}{
-				"name": id,
-			},
-		},
+		"Action": map[string]interface{}{"FocusMonitor": map[string]interface{}{"name": id}},
 	}, nil)
 }
 
 func (n *Niri) MoveToMonitor(windowID, monitorID string) error {
 	return n.request(map[string]interface{}{
-		"Action": map[string]interface{}{
-			"MoveWindowToMonitor": map[string]interface{}{
-				"name": monitorID,
-			},
-		},
+		"Action": map[string]interface{}{"MoveWindowToMonitor": map[string]interface{}{"name": monitorID}},
 	}, nil)
 }
 
 func (n *Niri) SetLayout(name string) error {
 	return n.request(map[string]interface{}{
-		"Action": map[string]interface{}{
-			"SwitchLayout": map[string]interface{}{
-				"name": name,
-			},
-		},
+		"Action": map[string]interface{}{"SwitchLayout": map[string]interface{}{"name": name}},
 	}, nil)
 }
 
@@ -308,18 +300,14 @@ func (n *Niri) ReloadConfig() error {
 func (n *Niri) Execute(command string) error {
 	return n.request(map[string]interface{}{
 		"Action": map[string]interface{}{
-			"Spawn": map[string]interface{}{
-				"command": []string{"sh", "-c", command},
-			},
+			"Spawn": map[string]interface{}{"command": []string{"sh", "-c", command}},
 		},
 	}, nil)
 }
 
 func (n *Niri) Exit() error {
 	return n.request(map[string]interface{}{
-		"Action": map[string]interface{}{
-			"Quit": map[string]interface{}{},
-		},
+		"Action": map[string]interface{}{"Quit": map[string]interface{}{}},
 	}, nil)
 }
 
@@ -341,13 +329,66 @@ func (n *Niri) Subscribe() (<-chan ipc.Event, error) {
 		dec := json.NewDecoder(conn)
 		for {
 			var eventWrapper struct {
-				Event json.RawMessage `json:"Event"`
+				Event map[string]json.RawMessage `json:"Event"`
 			}
 			if err := dec.Decode(&eventWrapper); err != nil {
 				break
 			}
-			ch <- ipc.Event{
-				Type: ipc.EventWorkspaceChanged,
+
+			event := ipc.Event{
+				Timestamp: time.Now().Unix(),
+				Payload:   make(map[string]interface{}),
+			}
+
+			for name, data := range eventWrapper.Event {
+				switch name {
+				case "WorkspacesChanged":
+					event.Type = ipc.EventWorkspaceChanged
+				case "WorkspaceActivated":
+					event.Type = ipc.EventWorkspaceChanged
+					var d struct {
+						ID int `json:"id"`
+					}
+					json.Unmarshal(data, &d)
+					event.Payload["id"] = d.ID
+				case "WindowOpened":
+					event.Type = ipc.EventWindowCreated
+					var d struct {
+						Window struct {
+							ID    int     `json:"id"`
+							Title *string `json:"title"`
+						} `json:"window"`
+					}
+					json.Unmarshal(data, &d)
+					title := ""
+					if d.Window.Title != nil {
+						title = *d.Window.Title
+					}
+					event.Window = &ipc.Window{
+						ID:    fmt.Sprintf("%d", d.Window.ID),
+						Title: title,
+					}
+				case "WindowClosed":
+					event.Type = ipc.EventWindowClosed
+					var d struct {
+						ID int `json:"id"`
+					}
+					json.Unmarshal(data, &d)
+					event.Payload["id"] = d.ID
+				case "WindowFocused":
+					event.Type = ipc.EventWindowFocused
+					var d struct {
+						ID *int `json:"id"`
+					}
+					json.Unmarshal(data, &d)
+					if d.ID != nil {
+						event.Payload["id"] = *d.ID
+					}
+				}
+			}
+
+			if event.Type != "" {
+				ch <- event
 			}
 		}
 	}()

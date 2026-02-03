@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"axctl/pkg/ipc"
@@ -13,6 +14,8 @@ import (
 
 type Mangowc struct {
 	socketPath string
+	mu         sync.Mutex
+	conn       net.Conn
 }
 
 func New() (*Mangowc, error) {
@@ -24,15 +27,29 @@ func New() (*Mangowc, error) {
 	return &Mangowc{socketPath: path}, nil
 }
 
+func (m *Mangowc) getConnection() (net.Conn, error) {
+	if m.conn != nil {
+		return m.conn, nil
+	}
+	conn, err := net.Dial("unix", m.socketPath)
+	if err != nil {
+		return nil, err
+	}
+	m.conn = conn
+	return conn, nil
+}
+
 func (m *Mangowc) command(cmd string) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	conn, err := net.Dial("unix", m.socketPath)
 	if err != nil {
 		return "", err
 	}
 	defer conn.Close()
 
-	_, err = conn.Write([]byte(cmd + "\n"))
-	if err != nil {
+	if _, err = conn.Write([]byte(cmd + "\n")); err != nil {
 		return "", err
 	}
 
@@ -159,7 +176,23 @@ func (m *Mangowc) SetLayout(name string) error {
 }
 
 func (m *Mangowc) SetConfig(key string, value interface{}) error {
-	return ipc.ErrNotSupported
+	switch key {
+	case "gaps.inner":
+		m.command(fmt.Sprintf("setoption gappih %v", value))
+		m.command(fmt.Sprintf("setoption gappiv %v", value))
+	case "gaps.outer":
+		m.command(fmt.Sprintf("setoption gappoh %v", value))
+		m.command(fmt.Sprintf("setoption gappov %v", value))
+	case "border.width":
+		m.command(fmt.Sprintf("setoption borderpx %v", value))
+	case "opacity.active":
+		m.command(fmt.Sprintf("setoption focused_opacity %v", value))
+	case "opacity.inactive":
+		m.command(fmt.Sprintf("setoption unfocused_opacity %v", value))
+	default:
+		return ipc.ErrNotSupported
+	}
+	return nil
 }
 
 func (m *Mangowc) ReloadConfig() error {
@@ -183,8 +216,7 @@ func (m *Mangowc) Subscribe() (<-chan ipc.Event, error) {
 		return nil, err
 	}
 
-	_, err = conn.Write([]byte("watch\n"))
-	if err != nil {
+	if _, err = conn.Write([]byte("watch\n")); err != nil {
 		conn.Close()
 		return nil, err
 	}
