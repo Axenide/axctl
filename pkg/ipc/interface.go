@@ -12,6 +12,10 @@ type Compositor interface {
 	ToggleFloating(id string) error
 	SetFullscreen(id string, state bool) error
 
+	ToggleGroup(id string) error
+	GroupNavigation(direction string) error
+	SetLayoutProperty(id string, key, value string) error
+
 	ListWorkspaces() ([]Workspace, error)
 	SwitchWorkspace(id string) error
 	MoveToWorkspace(windowID, workspaceID string) error

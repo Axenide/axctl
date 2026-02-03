@@ -158,6 +158,27 @@ func (s *Server) handleConnection(conn net.Conn) {
 			json.Unmarshal(req.Params, &p)
 			err = s.compositor.SetFullscreen(p.ID, p.State)
 
+		case "Window.ToggleGroup":
+			var p struct {
+				ID string `json:"id"`
+			}
+			json.Unmarshal(req.Params, &p)
+			err = s.compositor.ToggleGroup(p.ID)
+		case "Window.GroupNavigation":
+			var p struct {
+				Direction string `json:"direction"`
+			}
+			json.Unmarshal(req.Params, &p)
+			err = s.compositor.GroupNavigation(p.Direction)
+		case "Window.SetLayoutProperty":
+			var p struct {
+				ID    string `json:"id"`
+				Key   string `json:"key"`
+				Value string `json:"value"`
+			}
+			json.Unmarshal(req.Params, &p)
+			err = s.compositor.SetLayoutProperty(p.ID, p.Key, p.Value)
+
 		case "Workspace.List":
 			result = s.cache.GetWorkspaces()
 		case "Workspace.Switch":

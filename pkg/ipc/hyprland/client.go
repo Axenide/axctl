@@ -138,6 +138,24 @@ func (h *Hyprland) SetFullscreen(id string, state bool) error {
 	return err
 }
 
+func (h *Hyprland) ToggleGroup(id string) error {
+	_, err := h.dispatch("dispatch togglegroup")
+	return err
+}
+
+func (h *Hyprland) GroupNavigation(direction string) error {
+	dir := "f"
+	if direction == "l" || direction == "u" || direction == "b" {
+		dir = "b"
+	}
+	_, err := h.dispatch(fmt.Sprintf("dispatch changegroupactive %s", dir))
+	return err
+}
+
+func (h *Hyprland) SetLayoutProperty(id string, key, value string) error {
+	return ipc.ErrNotSupported
+}
+
 func (h *Hyprland) ListWorkspaces() ([]ipc.Workspace, error) {
 	resp, err := h.dispatch("j/workspaces")
 	if err != nil {

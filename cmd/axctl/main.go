@@ -49,6 +49,9 @@ func usage() {
 	fmt.Println("    resize <id> <w> <h>     Resize window")
 	fmt.Println("    toggle-floating <id>    Toggle floating")
 	fmt.Println("    fullscreen <id> <0|1>   Set fullscreen")
+	fmt.Println("    toggle-group <id>       Toggle window group (Hyprland)")
+	fmt.Println("    group-nav <f|b>         Navigate group tabs")
+	fmt.Println("    layout-prop <id> <k> <v> Set layout property (Niri/Mango)")
 	fmt.Println("\n  workspace <action> [args]")
 	fmt.Println("    list                    List all workspaces")
 	fmt.Println("    switch <id>             Switch workspace")
@@ -146,6 +149,20 @@ func handleRPC(category string, args []string) {
 		if len(args) > 2 {
 			params["id"] = args[1]
 			params["state"] = args[2] == "1"
+		}
+	case "Window.ToggleGroup":
+		if len(args) > 1 {
+			params["id"] = args[1]
+		}
+	case "Window.GroupNavigation":
+		if len(args) > 1 {
+			params["direction"] = args[1]
+		}
+	case "Window.SetLayoutProperty":
+		if len(args) > 3 {
+			params["id"] = args[1]
+			params["key"] = args[2]
+			params["value"] = args[3]
 		}
 	case "Workspace.Switch":
 		if len(args) > 1 {

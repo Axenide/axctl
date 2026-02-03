@@ -122,6 +122,22 @@ func (m *Mangowc) SetFullscreen(id string, state bool) error {
 	return err
 }
 
+func (m *Mangowc) ToggleGroup(id string) error {
+	return ipc.ErrNotSupported
+}
+
+func (m *Mangowc) GroupNavigation(direction string) error {
+	return ipc.ErrNotSupported
+}
+
+func (m *Mangowc) SetLayoutProperty(id string, key, value string) error {
+	if key == "tag" {
+		_, err := m.command(fmt.Sprintf("dispatch tag %s", value))
+		return err
+	}
+	return ipc.ErrNotSupported
+}
+
 func (m *Mangowc) ListWorkspaces() ([]ipc.Workspace, error) {
 	resp, err := m.command("getworkspaces")
 	if err != nil {

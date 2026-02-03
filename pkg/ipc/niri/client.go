@@ -196,6 +196,32 @@ func (n *Niri) SetFullscreen(id string, state bool) error {
 	}, nil)
 }
 
+func (n *Niri) ToggleGroup(id string) error {
+	return ipc.ErrNotSupported
+}
+
+func (n *Niri) GroupNavigation(direction string) error {
+	return ipc.ErrNotSupported
+}
+
+func (n *Niri) SetLayoutProperty(id string, key, value string) error {
+	action := ""
+	switch key {
+	case "column-width":
+		action = "SetWindowWidth"
+	default:
+		return ipc.ErrNotSupported
+	}
+
+	return n.request(map[string]interface{}{
+		"Action": map[string]interface{}{
+			action: map[string]interface{}{
+				"Fixed": value,
+			},
+		},
+	}, nil)
+}
+
 func (n *Niri) ListWorkspaces() ([]ipc.Workspace, error) {
 	var niriWorkspaces []struct {
 		ID       int     `json:"id"`
