@@ -214,6 +214,10 @@ func (m *Mangowc) SetConfig(key string, value interface{}) error {
 		m.command(fmt.Sprintf("setoption gappov %v", value))
 	case "border.width":
 		m.command(fmt.Sprintf("setoption borderpx %v", value))
+	case "border.active_color":
+		m.command(fmt.Sprintf("setoption focuscolor %v", ipc.FirstColor(fmt.Sprintf("%v", value))))
+	case "border.inactive_color":
+		m.command(fmt.Sprintf("setoption bordercolor %v", ipc.FirstColor(fmt.Sprintf("%v", value))))
 	case "opacity.active":
 		m.command(fmt.Sprintf("setoption focused_opacity %v", value))
 	case "opacity.inactive":

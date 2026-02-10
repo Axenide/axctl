@@ -345,7 +345,13 @@ func (n *Niri) SetLayout(name string) error {
 }
 
 func (n *Niri) SetConfig(key string, value interface{}) error {
-	return ipc.ErrNotSupported
+	switch key {
+	case "border.active_color", "border.inactive_color":
+		_ = ipc.FirstColor(fmt.Sprintf("%v", value))
+		return ipc.ErrNotSupported
+	default:
+		return ipc.ErrNotSupported
+	}
 }
 
 func (n *Niri) ReloadConfig() error {

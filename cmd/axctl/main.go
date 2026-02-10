@@ -67,6 +67,7 @@ func usage() {
 	fmt.Println("\n  config <action> [args]")
 	fmt.Println("    set <key> <value>       Set config key")
 	fmt.Println("                            Keys: gaps.inner, gaps.outer, border.width,")
+	fmt.Println("                                  border.active_color, border.inactive_color,")
 	fmt.Println("                                  opacity.active, opacity.inactive,")
 	fmt.Println("                                  blur.enabled, blur.size, blur.passes")
 	fmt.Println("    reload                  Reload config")
