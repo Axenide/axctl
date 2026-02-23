@@ -31,6 +31,8 @@ const (
 	EventWindowFocused EventType = "window_focused"
 	// EventWindowTitleChanged is fired when a window's title changes.
 	EventWindowTitleChanged EventType = "window_title_changed"
+	// EventWindowMoved is fired when a window is moved to another workspace.
+	EventWindowMoved EventType = "window_moved"
 	// EventWorkspaceChanged is fired when a workspace changes.
 	EventWorkspaceChanged EventType = "workspace_changed"
 	// EventMonitorChanged is fired when monitor layout changes.

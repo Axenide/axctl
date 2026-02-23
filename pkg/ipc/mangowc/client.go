@@ -199,6 +199,48 @@ func (m *Mangowc) MoveToMonitor(windowID, monitorID string) error {
 	return err
 }
 
+func (m *Mangowc) MoveWindowPixel(id string, x, y int) error {
+	return ipc.ErrNotSupported
+}
+
+func (m *Mangowc) MoveToWorkspaceSilent(windowID, workspaceID string) error {
+	return m.MoveToWorkspace(windowID, workspaceID)
+}
+
+func (m *Mangowc) ToggleSpecialWorkspace(name string) error {
+	return ipc.ErrNotSupported
+}
+
+func (m *Mangowc) GetConfig(key string) (interface{}, error) {
+	return nil, ipc.ErrNotSupported
+}
+
+func (m *Mangowc) BatchConfig(configs map[string]interface{}) error {
+	for k, v := range configs {
+		if err := m.SetConfig(k, v); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (m *Mangowc) GetAnimations() (interface{}, error) {
+	return nil, ipc.ErrNotSupported
+}
+
+func (m *Mangowc) GetCursorPosition() (int, int, error) {
+	return 0, 0, ipc.ErrNotSupported
+}
+
+func (m *Mangowc) BindKey(mods, key, command string) error {
+	return ipc.ErrNotSupported
+}
+
+func (m *Mangowc) UnbindKey(mods, key string) error {
+	return ipc.ErrNotSupported
+}
+
+
 func (m *Mangowc) SetLayout(name string) error {
 	_, err := m.command(fmt.Sprintf("dispatch switch_layout %s", name))
 	return err

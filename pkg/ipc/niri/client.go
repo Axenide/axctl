@@ -338,6 +338,49 @@ func (n *Niri) MoveToMonitor(windowID, monitorID string) error {
 	}, nil)
 }
 
+func (n *Niri) MoveWindowPixel(id string, x, y int) error {
+	return ipc.ErrNotSupported
+}
+
+func (n *Niri) MoveToWorkspaceSilent(windowID, workspaceID string) error {
+	// Fallback to normal MoveToWorkspace for Niri as it does not support silent move
+	return n.MoveToWorkspace(windowID, workspaceID)
+}
+
+func (n *Niri) ToggleSpecialWorkspace(name string) error {
+	return ipc.ErrNotSupported
+}
+
+func (n *Niri) GetConfig(key string) (interface{}, error) {
+	return nil, ipc.ErrNotSupported
+}
+
+func (n *Niri) BatchConfig(configs map[string]interface{}) error {
+	for k, v := range configs {
+		if err := n.SetConfig(k, v); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (n *Niri) GetAnimations() (interface{}, error) {
+	return nil, ipc.ErrNotSupported
+}
+
+func (n *Niri) GetCursorPosition() (int, int, error) {
+	return 0, 0, ipc.ErrNotSupported
+}
+
+func (n *Niri) BindKey(mods, key, command string) error {
+	return ipc.ErrNotSupported
+}
+
+func (n *Niri) UnbindKey(mods, key string) error {
+	return ipc.ErrNotSupported
+}
+
+
 func (n *Niri) SetLayout(name string) error {
 	return n.request(map[string]interface{}{
 		"Action": map[string]interface{}{"SwitchLayout": map[string]interface{}{"name": name}},

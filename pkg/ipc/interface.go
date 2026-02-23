@@ -19,9 +19,13 @@ type Compositor interface {
 	GroupNav(direction string) error
 	SetLayoutProperty(id string, key, value string) error
 
+	MoveWindowPixel(id string, x, y int) error
+
 	ListWorkspaces() ([]Workspace, error)
 	SwitchWorkspace(id string) error
 	MoveToWorkspace(windowID, workspaceID string) error
+	MoveToWorkspaceSilent(windowID, workspaceID string) error
+	ToggleSpecialWorkspace(name string) error
 
 	ListMonitors() ([]Monitor, error)
 	FocusMonitor(id string) error
@@ -29,8 +33,15 @@ type Compositor interface {
 
 	SetLayout(name string) error
 
+	GetConfig(key string) (interface{}, error)
 	SetConfig(key string, value interface{}) error
+	BatchConfig(configs map[string]interface{}) error
 	ReloadConfig() error
+	GetAnimations() (interface{}, error)
+	GetCursorPosition() (int, int, error)
+
+	BindKey(mods, key, command string) error
+	UnbindKey(mods, key string) error
 
 	Execute(command string) error
 	Exit() error

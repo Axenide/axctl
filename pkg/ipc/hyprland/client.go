@@ -133,7 +133,11 @@ func (h *Hyprland) CloseWindow(id string) error {
 }
 
 func (h *Hyprland) MoveWindow(id string, direction string) error {
-	_, err := h.dispatch(fmt.Sprintf("dispatch movewindow %s", direction))
+	arg := direction
+	if id != "" {
+		arg = direction + ",address:" + id
+	}
+	_, err := h.dispatch(fmt.Sprintf("dispatch movewindow %s", arg))
 	return err
 }
 
@@ -156,15 +160,29 @@ func (h *Hyprland) ToggleFloating(id string) error {
 }
 
 func (h *Hyprland) SetFullscreen(id string, state bool) error {
-	val := "0"
-	if state {
-		val = "0"
-	} else {
+	windows, err := h.ListWindows()
+	if err != nil {
+		return err
+	}
+
+	targetID := id
+	if targetID == "" {
+		targetID, _ = h.ActiveWindow()
+	}
+
+	isFs := false
+	for _, w := range windows {
+		if w.ID == targetID {
+			isFs = w.Fullscreen
+			break
+		}
+	}
+
+	if isFs != state {
 		_, err := h.dispatch("dispatch fullscreen 0")
 		return err
 	}
-	_, err := h.dispatch(fmt.Sprintf("dispatch fullscreen %s", val))
-	return err
+	return nil
 }
 
 func (h *Hyprland) SetMaximized(id string, state bool) error {
@@ -177,7 +195,12 @@ func (h *Hyprland) SetMaximized(id string, state bool) error {
 }
 
 func (h *Hyprland) PinWindow(id string, state bool) error {
-	_, err := h.dispatch("dispatch pin")
+	target := "address:" + id
+	if id == "" {
+		target = ""
+	}
+	// Hyprland 'pin' toggles the state for the given window
+	_, err := h.dispatch(fmt.Sprintf("dispatch pin %s", target))
 	return err
 }
 
@@ -296,6 +319,105 @@ func (h *Hyprland) SetLayout(name string) error {
 	return err
 }
 
+func (h *Hyprland) MoveWindowPixel(id string, x, y int) error {
+	target := "address:" + id
+	if id == "" {
+		target = ""
+	}
+	_, err := h.dispatch(fmt.Sprintf("dispatch movewindowpixel exact %d %d,%s", x, y, target))
+	return err
+}
+
+func (h *Hyprland) MoveToWorkspaceSilent(windowID, workspaceID string) error {
+	target := "address:" + windowID
+	if windowID == "" {
+		target = ""
+	}
+	_, err := h.dispatch(fmt.Sprintf("dispatch movetoworkspacesilent %s,%s", workspaceID, target))
+	return err
+}
+
+func (h *Hyprland) ToggleSpecialWorkspace(name string) error {
+	_, err := h.dispatch(fmt.Sprintf("dispatch togglespecialworkspace %s", name))
+	return err
+}
+
+func (h *Hyprland) GetConfig(key string) (interface{}, error) {
+	resp, err := h.dispatch(fmt.Sprintf("j/getoption %s", key))
+	if err != nil {
+		return nil, err
+	}
+	var data interface{}
+	if err := json.Unmarshal([]byte(resp), &data); err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
+func (h *Hyprland) BatchConfig(configs map[string]interface{}) error {
+	var cmds []string
+
+	mapping := map[string]string{
+		"gaps.inner":            "general:gaps_in",
+		"gaps.outer":            "general:gaps_out",
+		"border.width":          "general:border_size",
+		"border.active_color":   "general:col.active_border",
+		"border.inactive_color": "general:col.inactive_border",
+		"opacity.active":        "decoration:active_opacity",
+		"opacity.inactive":      "decoration:inactive_opacity",
+		"blur.enabled":          "decoration:blur:enabled",
+		"blur.size":             "decoration:blur:size",
+		"blur.passes":           "decoration:blur:passes",
+	}
+
+	for k, v := range configs {
+		hyprKey := k
+		if mapped, ok := mapping[k]; ok {
+			hyprKey = mapped
+		}
+		cmds = append(cmds, fmt.Sprintf("keyword %s %v", hyprKey, v))
+	}
+	_, err := h.dispatch(fmt.Sprintf("keyword --batch %s", strings.Join(cmds, ";")))
+	return err
+}
+
+func (h *Hyprland) GetAnimations() (interface{}, error) {
+	resp, err := h.dispatch("j/animations")
+	if err != nil {
+		return nil, err
+	}
+	var data interface{}
+	if err := json.Unmarshal([]byte(resp), &data); err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
+func (h *Hyprland) GetCursorPosition() (int, int, error) {
+	resp, err := h.dispatch("j/cursorpos")
+	if err != nil {
+		return 0, 0, err
+	}
+	var pos struct {
+		X int `json:"x"`
+		Y int `json:"y"`
+	}
+	if err := json.Unmarshal([]byte(resp), &pos); err != nil {
+		return 0, 0, err
+	}
+	return pos.X, pos.Y, nil
+}
+
+func (h *Hyprland) BindKey(mods, key, command string) error {
+	_, err := h.dispatch(fmt.Sprintf("keyword bind %s,%s,%s", mods, key, command))
+	return err
+}
+
+func (h *Hyprland) UnbindKey(mods, key string) error {
+	_, err := h.dispatch(fmt.Sprintf("keyword unbind %s,%s", mods, key))
+	return err
+}
+
 func (h *Hyprland) SetConfig(key string, value interface{}) error {
 	mapping := map[string]string{
 		"gaps.inner":            "general:gaps_in",
@@ -385,7 +507,7 @@ func (h *Hyprland) Subscribe() (<-chan ipc.Event, error) {
 			case "movewindow":
 				data := strings.SplitN(parts[1], ",", 2)
 				if len(data) >= 2 {
-					event.Type = ipc.EventWindowCreated
+					event.Type = ipc.EventWindowMoved
 					event.Payload["address"] = "0x" + data[0]
 					event.Payload["workspace"] = data[1]
 				}
