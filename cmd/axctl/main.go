@@ -42,6 +42,7 @@ func usage() {
 	fmt.Println("  daemon                    Start the IPC daemon")
 	fmt.Println("\n  window <action> [args]")
 	fmt.Println("    list                    List all windows")
+	fmt.Println("    active                  Get active window ID")
 	fmt.Println("    focus <id>              Focus a window")
 	fmt.Println("    focus-dir <l|r|u|d>     Focus in direction")
 	fmt.Println("    close [id]              Close a window")
@@ -58,16 +59,19 @@ func usage() {
 	fmt.Println("    move-to-workspace-silent <ws> [id] Move window silently")
 	fmt.Println("\n  workspace <action> [args]")
 	fmt.Println("    list                    List all workspaces")
+	fmt.Println("    active                  Get active workspace")
 	fmt.Println("    switch <id>             Switch workspace")
 	fmt.Println("    move-to <ws_id> [win_id] Move window to workspace")
-	fmt.Println("    toggle-special <name>   Toggle special workspace")
+	fmt.Println("    toggle-special [name]   Toggle special workspace")
 	fmt.Println("\n  monitor <action> [args]")
 	fmt.Println("    list                    List all monitors")
 	fmt.Println("    focus <id>              Focus monitor")
 	fmt.Println("    move-to <mon_id> [win_id] Move window to monitor")
+	fmt.Println("    set-dpms <mon_id> <0|1> Set DPMS on/off")
 	fmt.Println("\n  layout <action> [args]")
 	fmt.Println("    set <name>              Set layout")
 	fmt.Println("\n  config <action> [args]")
+	fmt.Println("    get <key>               Get config value")
 	fmt.Println("    set <key> <value>       Set config key")
 	fmt.Println("                            Keys: gaps.inner, gaps.outer, border.width,")
 	fmt.Println("                                  border.active_color, border.inactive_color,")
@@ -88,12 +92,29 @@ func runDaemon() {
 	var comp ipc.Compositor
 	var err error
 
-	if os.Getenv("HYPRLAND_INSTANCE_SIGNATURE") != "" {
-		comp, err = hyprland.New()
-	} else if os.Getenv("NIRI_SOCKET") != "" {
-		comp, err = niri.New()
-	} else {
+	// Try Hyprland: verify socket exists before selecting
+	if sig := os.Getenv("HYPRLAND_INSTANCE_SIGNATURE"); sig != "" {
+		socketPath := fmt.Sprintf("%s/hypr/%s/.socket.sock", os.Getenv("XDG_RUNTIME_DIR"), sig)
+		if _, statErr := os.Stat(socketPath); statErr == nil {
+			comp, err = hyprland.New()
+		}
+	}
+	// Try Niri: verify socket exists before selecting
+	if comp == nil && err == nil {
+		if path := os.Getenv("NIRI_SOCKET"); path != "" {
+			if _, statErr := os.Stat(path); statErr == nil {
+				comp, err = niri.New()
+			}
+		}
+	}
+	// Try MangoWC: verify XDG_CURRENT_DESKTOP is "mango"
+	if comp == nil && err == nil && os.Getenv("XDG_CURRENT_DESKTOP") == "mango" {
 		comp, err = mangowc.New()
+	}
+
+	if comp == nil && err == nil {
+		fmt.Println("Error: no supported compositor detected")
+		os.Exit(1)
 	}
 
 	if err != nil {
@@ -200,6 +221,24 @@ func handleRPC(category string, args []string) {
 		if len(args) > 3 {
 			params["id"] = args[3]
 		}
+	case "Window.MovePixel":
+		if len(args) > 2 {
+			var x, y int
+			fmt.Sscanf(args[1], "%d", &x)
+			fmt.Sscanf(args[2], "%d", &y)
+			params["x"] = x
+			params["y"] = y
+		}
+		if len(args) > 3 {
+			params["id"] = args[3]
+		}
+	case "Window.MoveToWorkspaceSilent":
+		if len(args) > 1 {
+			params["workspace_id"] = args[1]
+		}
+		if len(args) > 2 {
+			params["window_id"] = args[2]
+		}
 	case "Workspace.Switch":
 		if len(args) > 1 {
 			params["id"] = args[1]
@@ -210,6 +249,10 @@ func handleRPC(category string, args []string) {
 		}
 		if len(args) > 2 {
 			params["window_id"] = args[2]
+		}
+	case "Workspace.ToggleSpecial":
+		if len(args) > 1 {
+			params["name"] = args[1]
 		}
 	case "Monitor.Focus":
 		if len(args) > 1 {
@@ -222,14 +265,46 @@ func handleRPC(category string, args []string) {
 		if len(args) > 2 {
 			params["window_id"] = args[2]
 		}
+	case "Monitor.SetDpms":
+		if len(args) > 1 {
+			params["monitor_id"] = args[1]
+		}
+		if len(args) > 2 {
+			params["on"] = args[2] == "1"
+		}
 	case "Layout.Set":
 		if len(args) > 1 {
 			params["name"] = args[1]
+		}
+	case "Config.Get":
+		if len(args) > 1 {
+			params["key"] = args[1]
 		}
 	case "Config.Set":
 		if len(args) > 2 {
 			params["key"] = args[1]
 			params["value"] = args[2]
+		}
+	case "Config.Batch":
+		if len(args) > 1 {
+			var configs map[string]interface{}
+			if err := json.Unmarshal([]byte(args[1]), &configs); err == nil {
+				params["configs"] = configs
+			} else {
+				fmt.Printf("Error parsing JSON: %v\n", err)
+				return
+			}
+		}
+	case "Config.BindKey":
+		if len(args) > 3 {
+			params["mods"] = args[1]
+			params["key"] = args[2]
+			params["command"] = args[3]
+		}
+	case "Config.UnbindKey":
+		if len(args) > 2 {
+			params["mods"] = args[1]
+			params["key"] = args[2]
 		}
 	case "System.Execute":
 		if len(args) > 1 {

@@ -5,18 +5,25 @@ type Window struct {
 	Title         string
 	Class         string
 	WorkspaceID   string
+	MonitorID     string
 	Floating      bool
 	Fullscreen    bool
+	Maximized     bool
+	Pinned        bool
 	X, Y          int
 	Width, Height int
 }
 
 type Workspace struct {
-	ID        string
-	Name      string
-	MonitorID string
-	Active    bool
-	Layout    string
+	ID             string
+	Name           string
+	MonitorID      string
+	Active         bool
+	Layout         string
+	Index          int
+	Urgent         bool
+	Focused        bool
+	ActiveWindowID string
 }
 
 // EventType represents the type of event occurring in the compositor.
@@ -37,6 +44,12 @@ const (
 	EventWorkspaceChanged EventType = "workspace_changed"
 	// EventMonitorChanged is fired when monitor layout changes.
 	EventMonitorChanged EventType = "monitor_changed"
+	// EventConfigReloaded is fired when the compositor config is reloaded.
+	EventConfigReloaded EventType = "config_reloaded"
+	// EventFullscreenChanged is fired when a window's fullscreen state changes.
+	EventFullscreenChanged EventType = "fullscreen_changed"
+	// EventFocusedMonitorChanged is fired when the focused monitor changes.
+	EventFocusedMonitorChanged EventType = "focused_monitor_changed"
 )
 
 // Event represents a compositor event.

@@ -22,6 +22,7 @@ type Compositor interface {
 	MoveWindowPixel(id string, x, y int) error
 
 	ListWorkspaces() ([]Workspace, error)
+	ActiveWorkspace() (*Workspace, error)
 	SwitchWorkspace(id string) error
 	MoveToWorkspace(windowID, workspaceID string) error
 	MoveToWorkspaceSilent(windowID, workspaceID string) error
@@ -30,6 +31,7 @@ type Compositor interface {
 	ListMonitors() ([]Monitor, error)
 	FocusMonitor(id string) error
 	MoveToMonitor(windowID, monitorID string) error
+	SetDpms(monitorID string, on bool) error
 
 	SetLayout(name string) error
 
@@ -57,6 +59,10 @@ type Monitor struct {
 	Refresh   float64
 	Active    bool
 	Workspace string
+	Scale     float64
+	X         int
+	Y         int
+	Transform int
 }
 
 var (

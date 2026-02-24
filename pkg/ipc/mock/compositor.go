@@ -7,17 +7,14 @@ import (
 	"axctl/pkg/ipc"
 )
 
-// Compositor is a mock implementation of the ipc.Compositor interface.
-// It supports simulating various compositor behaviors for testing.
 type Compositor struct {
 	mu sync.RWMutex
 
-	// Storage for mock data
 	windows    []ipc.Window
 	workspaces []ipc.Workspace
+	monitors   []ipc.Monitor
 	events     chan ipc.Event
 
-	// Configurable responses
 	listWindowsErr     error
 	focusWindowErr     error
 	closeWindowErr     error
@@ -25,7 +22,6 @@ type Compositor struct {
 	switchWorkspaceErr error
 	subscribeErr       error
 
-	// Call tracking for verification
 	calls struct {
 		listWindows     int
 		focusWindow     []string
@@ -35,19 +31,18 @@ type Compositor struct {
 		subscribe       int
 	}
 
-	// Subscription state
 	subscribed bool
 	eventChan  chan ipc.Event
 	cancelChan chan struct{}
 	eventWg    sync.WaitGroup
 }
 
-// NewCompositor creates a new mock compositor with default values.
 func NewCompositor() *Compositor {
 	return &Compositor{
 		windows:    []ipc.Window{},
 		workspaces: []ipc.Workspace{},
-		eventChan:  make(chan ipc.Event, 100), // buffered to allow queuing events
+		monitors:   []ipc.Monitor{},
+		eventChan:  make(chan ipc.Event, 100),
 		cancelChan: make(chan struct{}),
 		calls: struct {
 			listWindows     int
@@ -64,7 +59,6 @@ func NewCompositor() *Compositor {
 	}
 }
 
-// ListWindows returns all currently open windows.
 func (c *Compositor) ListWindows() ([]ipc.Window, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -75,13 +69,21 @@ func (c *Compositor) ListWindows() ([]ipc.Window, error) {
 		return nil, c.listWindowsErr
 	}
 
-	// Return a copy to prevent external modification
 	windows := make([]ipc.Window, len(c.windows))
 	copy(windows, c.windows)
 	return windows, nil
 }
 
-// FocusWindow brings the window with the given ID into focus.
+func (c *Compositor) ActiveWindow() (string, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	for _, w := range c.windows {
+		return w.ID, nil
+	}
+	return "", nil
+}
+
 func (c *Compositor) FocusWindow(id string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -92,7 +94,6 @@ func (c *Compositor) FocusWindow(id string) error {
 		return c.focusWindowErr
 	}
 
-	// Check if window exists
 	for _, w := range c.windows {
 		if w.ID == id {
 			return nil
@@ -102,7 +103,10 @@ func (c *Compositor) FocusWindow(id string) error {
 	return ipc.ErrWindowNotFound
 }
 
-// CloseWindow closes the window with the given ID.
+func (c *Compositor) FocusDir(direction string) error {
+	return nil
+}
+
 func (c *Compositor) CloseWindow(id string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -113,7 +117,6 @@ func (c *Compositor) CloseWindow(id string) error {
 		return c.closeWindowErr
 	}
 
-	// Check if window exists and remove it
 	for i, w := range c.windows {
 		if w.ID == id {
 			c.windows = append(c.windows[:i], c.windows[i+1:]...)
@@ -124,7 +127,46 @@ func (c *Compositor) CloseWindow(id string) error {
 	return ipc.ErrWindowNotFound
 }
 
-// ListWorkspaces returns all workspaces known to the compositor.
+func (c *Compositor) MoveWindow(id string, direction string) error {
+	return nil
+}
+
+func (c *Compositor) ResizeWindow(id string, width, height int) error {
+	return nil
+}
+
+func (c *Compositor) ToggleFloating(id string) error {
+	return nil
+}
+
+func (c *Compositor) SetFullscreen(id string, state bool) error {
+	return nil
+}
+
+func (c *Compositor) SetMaximized(id string, state bool) error {
+	return nil
+}
+
+func (c *Compositor) PinWindow(id string, state bool) error {
+	return nil
+}
+
+func (c *Compositor) ToggleGroup(id string) error {
+	return nil
+}
+
+func (c *Compositor) GroupNav(direction string) error {
+	return nil
+}
+
+func (c *Compositor) SetLayoutProperty(id string, key, value string) error {
+	return nil
+}
+
+func (c *Compositor) MoveWindowPixel(id string, x, y int) error {
+	return nil
+}
+
 func (c *Compositor) ListWorkspaces() ([]ipc.Workspace, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -135,13 +177,26 @@ func (c *Compositor) ListWorkspaces() ([]ipc.Workspace, error) {
 		return nil, c.listWorkspacesErr
 	}
 
-	// Return a copy to prevent external modification
 	workspaces := make([]ipc.Workspace, len(c.workspaces))
 	copy(workspaces, c.workspaces)
 	return workspaces, nil
 }
 
-// SwitchWorkspace switches to the workspace with the given ID.
+func (c *Compositor) ActiveWorkspace() (*ipc.Workspace, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	for _, ws := range c.workspaces {
+		if ws.Active {
+			return &ws, nil
+		}
+	}
+	if len(c.workspaces) > 0 {
+		return &c.workspaces[0], nil
+	}
+	return nil, ipc.ErrWorkspaceNotFound
+}
+
 func (c *Compositor) SwitchWorkspace(id string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -152,7 +207,6 @@ func (c *Compositor) SwitchWorkspace(id string) error {
 		return c.switchWorkspaceErr
 	}
 
-	// Check if workspace exists
 	for _, ws := range c.workspaces {
 		if ws.ID == id {
 			return nil
@@ -162,7 +216,83 @@ func (c *Compositor) SwitchWorkspace(id string) error {
 	return ipc.ErrWorkspaceNotFound
 }
 
-// Subscribe returns a channel that emits compositor events.
+func (c *Compositor) MoveToWorkspace(windowID, workspaceID string) error {
+	return nil
+}
+
+func (c *Compositor) MoveToWorkspaceSilent(windowID, workspaceID string) error {
+	return nil
+}
+
+func (c *Compositor) ToggleSpecialWorkspace(name string) error {
+	return nil
+}
+
+func (c *Compositor) ListMonitors() ([]ipc.Monitor, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	monitors := make([]ipc.Monitor, len(c.monitors))
+	copy(monitors, c.monitors)
+	return monitors, nil
+}
+
+func (c *Compositor) FocusMonitor(id string) error {
+	return nil
+}
+
+func (c *Compositor) MoveToMonitor(windowID, monitorID string) error {
+	return nil
+}
+
+func (c *Compositor) SetDpms(monitorID string, on bool) error {
+	return nil
+}
+
+func (c *Compositor) SetLayout(name string) error {
+	return nil
+}
+
+func (c *Compositor) GetConfig(key string) (interface{}, error) {
+	return nil, nil
+}
+
+func (c *Compositor) SetConfig(key string, value interface{}) error {
+	return nil
+}
+
+func (c *Compositor) BatchConfig(configs map[string]interface{}) error {
+	return nil
+}
+
+func (c *Compositor) ReloadConfig() error {
+	return nil
+}
+
+func (c *Compositor) GetAnimations() (interface{}, error) {
+	return nil, nil
+}
+
+func (c *Compositor) GetCursorPosition() (int, int, error) {
+	return 0, 0, nil
+}
+
+func (c *Compositor) BindKey(mods, key, command string) error {
+	return nil
+}
+
+func (c *Compositor) UnbindKey(mods, key string) error {
+	return nil
+}
+
+func (c *Compositor) Execute(command string) error {
+	return nil
+}
+
+func (c *Compositor) Exit() error {
+	return nil
+}
+
 func (c *Compositor) Subscribe() (<-chan ipc.Event, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -174,22 +304,18 @@ func (c *Compositor) Subscribe() (<-chan ipc.Event, error) {
 	}
 
 	if c.subscribed {
-		// Return a new channel for this subscription
 		ch := make(chan ipc.Event, 100)
 		return ch, nil
 	}
 
 	c.subscribed = true
 
-	// Start goroutine to forward events
 	c.eventWg.Add(1)
 	go func() {
 		defer c.eventWg.Done()
 		for {
 			select {
 			case <-c.eventChan:
-				// Events are directly received from channel by subscribers
-				// No forwarding needed; channel is passed directly to caller
 			case <-c.cancelChan:
 				return
 			}
@@ -199,68 +325,60 @@ func (c *Compositor) Subscribe() (<-chan ipc.Event, error) {
 	return c.eventChan, nil
 }
 
-// ============================================================================
-// Helper Methods for Testing
-// ============================================================================
-
-// AddWindow adds a window to the mock compositor's state.
 func (c *Compositor) AddWindow(w ipc.Window) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.windows = append(c.windows, w)
 }
 
-// AddWorkspace adds a workspace to the mock compositor's state.
 func (c *Compositor) AddWorkspace(ws ipc.Workspace) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.workspaces = append(c.workspaces, ws)
 }
 
-// SetListWindowsError sets the error to return from ListWindows.
+func (c *Compositor) AddMonitor(m ipc.Monitor) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.monitors = append(c.monitors, m)
+}
+
 func (c *Compositor) SetListWindowsError(err error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.listWindowsErr = err
 }
 
-// SetFocusWindowError sets the error to return from FocusWindow.
 func (c *Compositor) SetFocusWindowError(err error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.focusWindowErr = err
 }
 
-// SetCloseWindowError sets the error to return from CloseWindow.
 func (c *Compositor) SetCloseWindowError(err error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.closeWindowErr = err
 }
 
-// SetListWorkspacesError sets the error to return from ListWorkspaces.
 func (c *Compositor) SetListWorkspacesError(err error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.listWorkspacesErr = err
 }
 
-// SetSwitchWorkspaceError sets the error to return from SwitchWorkspace.
 func (c *Compositor) SetSwitchWorkspaceError(err error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.switchWorkspaceErr = err
 }
 
-// SetSubscribeError sets the error to return from Subscribe.
 func (c *Compositor) SetSubscribeError(err error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.subscribeErr = err
 }
 
-// EmitEvent injects an event into the subscription channel.
-// This is used to simulate compositor events during testing.
 func (c *Compositor) EmitEvent(evt ipc.Event) {
 	c.mu.RLock()
 	ch := c.eventChan
@@ -270,12 +388,10 @@ func (c *Compositor) EmitEvent(evt ipc.Event) {
 		select {
 		case ch <- evt:
 		case <-c.cancelChan:
-			// Subscription was cancelled
 		}
 	}
 }
 
-// Close closes the event channel and stops the subscription.
 func (c *Compositor) Close() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -288,18 +404,12 @@ func (c *Compositor) Close() {
 	}
 }
 
-// ============================================================================
-// Call Tracking Methods
-// ============================================================================
-
-// ListWindowsCalls returns the number of times ListWindows was called.
 func (c *Compositor) ListWindowsCalls() int {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.calls.listWindows
 }
 
-// FocusWindowCalls returns the list of window IDs passed to FocusWindow.
 func (c *Compositor) FocusWindowCalls() []string {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -308,7 +418,6 @@ func (c *Compositor) FocusWindowCalls() []string {
 	return calls
 }
 
-// CloseWindowCalls returns the list of window IDs passed to CloseWindow.
 func (c *Compositor) CloseWindowCalls() []string {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -317,14 +426,12 @@ func (c *Compositor) CloseWindowCalls() []string {
 	return calls
 }
 
-// ListWorkspacesCalls returns the number of times ListWorkspaces was called.
 func (c *Compositor) ListWorkspacesCalls() int {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.calls.listWorkspaces
 }
 
-// SwitchWorkspaceCalls returns the list of workspace IDs passed to SwitchWorkspace.
 func (c *Compositor) SwitchWorkspaceCalls() []string {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -333,20 +440,19 @@ func (c *Compositor) SwitchWorkspaceCalls() []string {
 	return calls
 }
 
-// SubscribeCalls returns the number of times Subscribe was called.
 func (c *Compositor) SubscribeCalls() int {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.calls.subscribe
 }
 
-// Reset clears all stored data and call history.
 func (c *Compositor) Reset() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	c.windows = []ipc.Window{}
 	c.workspaces = []ipc.Workspace{}
+	c.monitors = []ipc.Monitor{}
 	c.listWindowsErr = nil
 	c.focusWindowErr = nil
 	c.closeWindowErr = nil
@@ -362,17 +468,11 @@ func (c *Compositor) Reset() {
 	c.calls.subscribe = 0
 }
 
-// ============================================================================
-// JSON/Text Helper Functions
-// ============================================================================
-
-// WindowToJSON converts a Window to JSON bytes.
 func WindowToJSON(w ipc.Window) []byte {
 	data, _ := json.Marshal(w)
 	return data
 }
 
-// WindowFromJSON parses JSON bytes into a Window.
 func WindowFromJSON(data []byte) (*ipc.Window, error) {
 	var w ipc.Window
 	err := json.Unmarshal(data, &w)
@@ -382,13 +482,11 @@ func WindowFromJSON(data []byte) (*ipc.Window, error) {
 	return &w, nil
 }
 
-// WorkspaceToJSON converts a Workspace to JSON bytes.
 func WorkspaceToJSON(ws ipc.Workspace) []byte {
 	data, _ := json.Marshal(ws)
 	return data
 }
 
-// WorkspaceFromJSON parses JSON bytes into a Workspace.
 func WorkspaceFromJSON(data []byte) (*ipc.Workspace, error) {
 	var ws ipc.Workspace
 	err := json.Unmarshal(data, &ws)
@@ -398,13 +496,11 @@ func WorkspaceFromJSON(data []byte) (*ipc.Workspace, error) {
 	return &ws, nil
 }
 
-// EventToJSON converts an Event to JSON bytes.
 func EventToJSON(evt ipc.Event) []byte {
 	data, _ := json.Marshal(evt)
 	return data
 }
 
-// EventFromJSON parses JSON bytes into an Event.
 func EventFromJSON(data []byte) (*ipc.Event, error) {
 	var evt ipc.Event
 	err := json.Unmarshal(data, &evt)
@@ -414,7 +510,6 @@ func EventFromJSON(data []byte) (*ipc.Event, error) {
 	return &evt, nil
 }
 
-// EventToText converts an Event to a human-readable text format.
 func EventToText(evt ipc.Event) string {
 	switch evt.Type {
 	case ipc.EventWindowCreated:
@@ -444,6 +539,12 @@ func EventToText(evt ipc.Event) string {
 		return "WORKSPACE_CHANGED"
 	case ipc.EventMonitorChanged:
 		return "MONITOR_CHANGED"
+	case ipc.EventConfigReloaded:
+		return "CONFIG_RELOADED"
+	case ipc.EventFullscreenChanged:
+		return "FULLSCREEN_CHANGED"
+	case ipc.EventFocusedMonitorChanged:
+		return "FOCUSED_MONITOR_CHANGED"
 	default:
 		return "UNKNOWN_EVENT"
 	}

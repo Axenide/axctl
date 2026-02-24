@@ -69,6 +69,8 @@ func (h *Hyprland) ListWindows() ([]ipc.Window, error) {
 		Class      string `json:"class"`
 		Floating   bool   `json:"floating"`
 		Fullscreen int    `json:"fullscreen"`
+		Pinned     bool   `json:"pinned"`
+		Monitor    int    `json:"monitor"`
 		At         []int  `json:"at"`
 		Size       []int  `json:"size"`
 		Workspace  struct {
@@ -88,8 +90,10 @@ func (h *Hyprland) ListWindows() ([]ipc.Window, error) {
 			Title:       c.Title,
 			Class:       c.Class,
 			WorkspaceID: fmt.Sprintf("%d", c.Workspace.ID),
+			MonitorID:   fmt.Sprintf("%d", c.Monitor),
 			Floating:    c.Floating,
 			Fullscreen:  c.Fullscreen != 0,
+			Pinned:      c.Pinned,
 			X:           c.At[0],
 			Y:           c.At[1],
 			Width:       c.Size[0],
@@ -199,7 +203,6 @@ func (h *Hyprland) PinWindow(id string, state bool) error {
 	if id == "" {
 		target = ""
 	}
-	// Hyprland 'pin' toggles the state for the given window
 	_, err := h.dispatch(fmt.Sprintf("dispatch pin %s", target))
 	return err
 }
@@ -238,15 +241,47 @@ func (h *Hyprland) ListWorkspaces() ([]ipc.Workspace, error) {
 		return nil, err
 	}
 
+	activeResp, _ := h.dispatch("j/activeworkspace")
+	var activeWS struct {
+		ID int `json:"id"`
+	}
+	if activeResp != "" {
+		json.Unmarshal([]byte(activeResp), &activeWS)
+	}
+
 	res := make([]ipc.Workspace, len(workspaces))
 	for i, w := range workspaces {
 		res[i] = ipc.Workspace{
 			ID:        fmt.Sprintf("%d", w.ID),
 			Name:      w.Name,
 			MonitorID: w.Monitor,
+			Active:    w.ID == activeWS.ID,
+			Focused:   w.ID == activeWS.ID,
 		}
 	}
 	return res, nil
+}
+
+func (h *Hyprland) ActiveWorkspace() (*ipc.Workspace, error) {
+	resp, err := h.dispatch("j/activeworkspace")
+	if err != nil {
+		return nil, err
+	}
+	var ws struct {
+		ID      int    `json:"id"`
+		Name    string `json:"name"`
+		Monitor string `json:"monitor"`
+	}
+	if err := json.Unmarshal([]byte(resp), &ws); err != nil {
+		return nil, err
+	}
+	return &ipc.Workspace{
+		ID:        fmt.Sprintf("%d", ws.ID),
+		Name:      ws.Name,
+		MonitorID: ws.Monitor,
+		Active:    true,
+		Focused:   true,
+	}, nil
 }
 
 func (h *Hyprland) SwitchWorkspace(id string) error {
@@ -276,6 +311,10 @@ func (h *Hyprland) ListMonitors() ([]ipc.Monitor, error) {
 		Height          int     `json:"height"`
 		RefreshRate     float64 `json:"refreshRate"`
 		Focused         bool    `json:"focused"`
+		Scale           float64 `json:"scale"`
+		X               int     `json:"x"`
+		Y               int     `json:"y"`
+		Transform       int     `json:"transform"`
 		ActiveWorkspace struct {
 			Name string `json:"name"`
 		} `json:"activeWorkspace"`
@@ -295,6 +334,10 @@ func (h *Hyprland) ListMonitors() ([]ipc.Monitor, error) {
 			Refresh:   m.RefreshRate,
 			Active:    m.Focused,
 			Workspace: m.ActiveWorkspace.Name,
+			Scale:     m.Scale,
+			X:         m.X,
+			Y:         m.Y,
+			Transform: m.Transform,
 		}
 	}
 	return res, nil
@@ -311,6 +354,19 @@ func (h *Hyprland) MoveToMonitor(windowID, monitorID string) error {
 		target = ""
 	}
 	_, err := h.dispatch(fmt.Sprintf("dispatch movewindowmon %s,%s", monitorID, target))
+	return err
+}
+
+func (h *Hyprland) SetDpms(monitorID string, on bool) error {
+	state := "off"
+	if on {
+		state = "on"
+	}
+	if monitorID != "" {
+		_, err := h.dispatch(fmt.Sprintf("dispatch dpms %s %s", state, monitorID))
+		return err
+	}
+	_, err := h.dispatch(fmt.Sprintf("dispatch dpms %s", state))
 	return err
 }
 
@@ -377,7 +433,7 @@ func (h *Hyprland) BatchConfig(configs map[string]interface{}) error {
 		}
 		cmds = append(cmds, fmt.Sprintf("keyword %s %v", hyprKey, v))
 	}
-	_, err := h.dispatch(fmt.Sprintf("keyword --batch %s", strings.Join(cmds, ";")))
+	_, err := h.dispatch(fmt.Sprintf("[[BATCH]]%s", strings.Join(cmds, ";")))
 	return err
 }
 
@@ -518,11 +574,28 @@ func (h *Hyprland) Subscribe() (<-chan ipc.Event, error) {
 					event.Payload["floating"] = data[1] == "1"
 				}
 			case "fullscreen":
+				event.Type = ipc.EventFullscreenChanged
 				event.Payload["fullscreen"] = parts[1] == "1"
 			case "monitoradded":
+				event.Type = ipc.EventMonitorChanged
 				event.Payload["monitor"] = parts[1]
+				event.Payload["action"] = "added"
 			case "monitorremoved":
+				event.Type = ipc.EventMonitorChanged
 				event.Payload["monitor"] = parts[1]
+				event.Payload["action"] = "removed"
+			case "configreloaded":
+				event.Type = ipc.EventConfigReloaded
+			case "focusedmon":
+				event.Type = ipc.EventFocusedMonitorChanged
+				data := strings.SplitN(parts[1], ",", 2)
+				if len(data) >= 2 {
+					event.Payload["monitor"] = data[0]
+					event.Payload["workspace"] = data[1]
+				}
+			case "windowtitle":
+				event.Type = ipc.EventWindowTitleChanged
+				event.Payload["address"] = "0x" + parts[1]
 			}
 
 			if event.Type != "" || len(event.Payload) > 0 {
