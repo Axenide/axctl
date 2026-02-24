@@ -742,3 +742,25 @@ func (n *Niri) Subscribe() (<-chan ipc.Event, error) {
 
 	return ch, nil
 }
+
+func (n *Niri) SwitchKeyboardLayout(action string) error {
+	var layoutArg interface{} = "Next"
+	if action == "prev" {
+		layoutArg = "Prev"
+	} else if action != "next" {
+		var idx int
+		if _, err := fmt.Sscanf(action, "%d", &idx); err == nil {
+			layoutArg = idx
+		}
+	}
+	// For Niri, it's either "Next", "Prev", or integer index
+	req := map[string]interface{}{
+		"Action": map[string]interface{}{"SwitchLayout": layoutArg},
+	}
+	var resp interface{}
+	return n.request(req, &resp)
+}
+
+func (n *Niri) SetKeyboardLayouts(layouts string, variants string) error {
+	return ipc.ErrNotSupported
+}

@@ -606,3 +606,23 @@ func (h *Hyprland) Subscribe() (<-chan ipc.Event, error) {
 
 	return ch, nil
 }
+
+func (h *Hyprland) SwitchKeyboardLayout(action string) error {
+	cmd := fmt.Sprintf("switchxkblayout current %s", action)
+	_, err := h.dispatch(cmd)
+	return err
+}
+
+func (h *Hyprland) SetKeyboardLayouts(layouts string, variants string) error {
+	if _, err := h.dispatch(fmt.Sprintf("keyword input:kb_layout %s", layouts)); err != nil {
+		return err
+	}
+	if variants != "" {
+		if _, err := h.dispatch(fmt.Sprintf("keyword input:kb_variant %s", variants)); err != nil {
+			return err
+		}
+	} else {
+		h.dispatch("keyword input:kb_variant ") // clear
+	}
+	return nil
+}

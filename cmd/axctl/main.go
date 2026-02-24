@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"path/filepath"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 
@@ -86,6 +86,8 @@ func usage() {
 	fmt.Println("\n  system <action> [args]")
 	fmt.Println("    execute <cmd>           Execute command")
 	fmt.Println("    get-cursor-position     Get absolute cursor position")
+	fmt.Println("    switch-keyboard-layout [next|prev] Switch keyboard layout")
+	fmt.Println("    set-keyboard-layouts <layouts> [variants] Set keyboard layouts (e.g. \"us,es\" \"altgr-intl,\")")
 	fmt.Println("    exit                    Exit compositor")
 }
 
@@ -101,7 +103,7 @@ func findLatestSocket(pattern string) string {
 	if err != nil || len(matches) == 0 {
 		return ""
 	}
-	
+
 	// Filter out lock files
 	var filtered []string
 	for _, m := range matches {
@@ -113,7 +115,7 @@ func findLatestSocket(pattern string) string {
 	if len(matches) == 0 {
 		return ""
 	}
-	
+
 	if len(matches) == 1 {
 		return matches[0]
 	}
@@ -223,7 +225,7 @@ func runDaemon() {
 					filtered = append(filtered, m)
 				}
 			}
-			
+
 			for _, wlSock := range filtered {
 				if filepath.Base(wlSock) == os.Getenv("WAYLAND_DISPLAY") {
 					continue // Already tried
@@ -236,7 +238,7 @@ func runDaemon() {
 					break
 				}
 			}
-			
+
 			if comp == nil {
 				fmt.Printf("Debug - MangoWC detection failed on all sockets.\n")
 			}
@@ -439,6 +441,19 @@ func handleRPC(category string, args []string) {
 	case "System.Execute":
 		if len(args) > 1 {
 			params["command"] = args[1]
+		}
+	case "System.SwitchKeyboardLayout":
+		if len(args) > 1 {
+			params["action"] = args[1]
+		} else {
+			params["action"] = "next"
+		}
+	case "System.SetKeyboardLayouts":
+		if len(args) > 1 {
+			params["layouts"] = args[1]
+		}
+		if len(args) > 2 {
+			params["variants"] = args[2]
 		}
 	}
 

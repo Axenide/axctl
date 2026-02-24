@@ -549,3 +549,15 @@ func EventToText(evt ipc.Event) string {
 		return "UNKNOWN_EVENT"
 	}
 }
+
+func (m *MockCompositor) SwitchKeyboardLayout(action string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return nil
+}
+
+func (m *MockCompositor) SetKeyboardLayouts(layouts string, variants string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return nil
+}

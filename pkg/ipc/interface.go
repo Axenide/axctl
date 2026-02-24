@@ -48,6 +48,9 @@ type Compositor interface {
 	Execute(command string) error
 	Exit() error
 
+	SwitchKeyboardLayout(action string) error
+	SetKeyboardLayouts(layouts string, variants string) error
+
 	Subscribe() (<-chan Event, error)
 }
 

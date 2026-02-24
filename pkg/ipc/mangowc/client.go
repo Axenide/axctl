@@ -863,3 +863,39 @@ func (m *Mangowc) Subscribe() (<-chan ipc.Event, error) {
 
 	return ch, nil
 }
+
+func (m *Mangowc) SwitchKeyboardLayout(action string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	ipcOut := m.activeIpcOutputLocked()
+	if ipcOut == nil {
+		return ipc.ErrCompositorNotAvailable
+	}
+
+	arg := "0" // Default to next
+	if action != "next" && action != "prev" {
+		var idx int
+		if _, err := fmt.Sscanf(action, "%d", &idx); err == nil {
+			arg = fmt.Sprintf("%d", idx+1) // mangowc uses 1-based index
+		}
+	}
+	return ipcOut.DispatchCmd("switch_keyboard_layout", arg, "", "", "", "")
+}
+
+func (m *Mangowc) SetKeyboardLayouts(layouts string, variants string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	ipcOut := m.activeIpcOutputLocked()
+	if ipcOut == nil {
+		return ipc.ErrCompositorNotAvailable
+	}
+
+	if variants != "" {
+		if err := ipcOut.DispatchCmd("setoption", "xkb_rules_variant", variants, "", "", ""); err != nil {
+			return err
+		}
+	} else {
+		ipcOut.DispatchCmd("setoption", "xkb_rules_variant", " ", "", "", "")
+	}
+	return ipcOut.DispatchCmd("setoption", "xkb_rules_layout", layouts, "", "", "")
+}

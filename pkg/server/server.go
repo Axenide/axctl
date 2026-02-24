@@ -411,6 +411,22 @@ func (s *Server) handleConnection(conn net.Conn) {
 			}
 		case "System.Exit":
 			err = s.compositor.Exit()
+		case "System.SwitchKeyboardLayout":
+			var p struct {
+				Action string `json:"action"`
+			}
+			json.Unmarshal(req.Params, &p)
+			if p.Action == "" {
+				p.Action = "next"
+			}
+			err = s.compositor.SwitchKeyboardLayout(p.Action)
+		case "System.SetKeyboardLayouts":
+			var p struct {
+				Layouts  string `json:"layouts"`
+				Variants string `json:"variants"`
+			}
+			json.Unmarshal(req.Params, &p)
+			err = s.compositor.SetKeyboardLayouts(p.Layouts, p.Variants)
 
 		default:
 			resp.Error = "method not found"
