@@ -164,7 +164,7 @@ func (n *Niri) FocusDir(direction string) error {
 		return fmt.Errorf("invalid direction")
 	}
 	return n.request(map[string]interface{}{
-		"Action": map[string]interface{}{action: map[string]interface{}{}},
+		"Action": action,
 	}, nil)
 }
 
@@ -197,7 +197,7 @@ func (n *Niri) MoveWindow(id string, direction string) error {
 		return fmt.Errorf("invalid direction")
 	}
 	return n.request(map[string]interface{}{
-		"Action": map[string]interface{}{action: map[string]interface{}{}},
+		"Action": action,
 	}, nil)
 }
 
@@ -279,7 +279,7 @@ func (n *Niri) SetMaximized(id string, state bool) error {
 		action = "UnmaximizeWindow"
 	}
 	return n.request(map[string]interface{}{
-		"Action": map[string]interface{}{action: map[string]interface{}{}},
+		"Action": action,
 	}, nil)
 }
 
