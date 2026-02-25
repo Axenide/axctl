@@ -26,6 +26,9 @@ func main() {
 	switch os.Args[1] {
 	case "daemon":
 		runDaemon()
+	case "subscribe":
+		runSubscribe()
+		runDaemon()
 	case "window", "workspace", "monitor", "layout", "config", "system":
 		if len(os.Args) < 3 {
 			usage()
@@ -41,6 +44,7 @@ func usage() {
 	fmt.Println("Usage: axctl <command> <action> [args]")
 	fmt.Println("\nCommands:")
 	fmt.Println("  daemon                    Start the IPC daemon")
+	fmt.Println("  subscribe                 Stream events from the daemon")
 	fmt.Println("\n  window <action> [args]")
 	fmt.Println("    list                    List all windows")
 	fmt.Println("    active                  Get active window ID")
@@ -281,6 +285,31 @@ func runDaemon() {
 
 	<-sig
 	os.Remove(socketPath)
+}
+
+func runSubscribe() {
+	socketPath := fmt.Sprintf("/tmp/axctl-%d.sock", os.Getuid())
+	conn, err := net.Dial("unix", socketPath)
+	if err != nil {
+		fmt.Printf("Error connecting to daemon: %v\n", err)
+		return
+	}
+	defer conn.Close()
+
+	dec := json.NewDecoder(conn)
+	for {
+		var msg json.RawMessage
+		if err := dec.Decode(&msg); err != nil {
+			fmt.Printf("Connection closed or error: %v\n", err)
+			return
+		}
+		var notif struct {
+			JSONRPC string `json:"jsonrpc"`
+		}
+		if err := json.Unmarshal(msg, &notif); err == nil && notif.JSONRPC == "2.0" {
+			fmt.Println(string(msg))
+		}
+	}
 }
 
 func handleRPC(category string, args []string) {
