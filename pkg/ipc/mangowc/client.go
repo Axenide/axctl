@@ -11,6 +11,7 @@ import (
 	"axctl/pkg/ipc/mangowc/dwlipc"
 
 	"axctl/pkg/ipc/wayland/client"
+	"axctl/pkg/ipc/wayland/foreign_toplevel_v1"
 )
 
 type tagState struct {
@@ -39,6 +40,23 @@ type outputState struct {
 	ipcOutput  *dwlipc.IpcOutputV2
 }
 
+type toplevelInfo struct {
+	handle     *foreign_toplevel_v1.ForeignToplevelHandleV1
+	title      string
+	appId      string
+	outputName string
+	activated  bool
+	maximized  bool
+	fullscreen bool
+	// pending state written by event handlers, committed on "done"
+	pendTitle      string
+	pendAppId      string
+	pendOutputName string
+	pendActivated  bool
+	pendMaximized  bool
+	pendFullscreen bool
+}
+
 type Mangowc struct {
 	display *client.Display
 	manager *dwlipc.IpcManagerV2
@@ -47,8 +65,12 @@ type Mangowc struct {
 	tagCount uint32
 	layouts  []string
 
-	outputs map[uint32]*outputState
-	pending map[uint32]*outputState
+	outputs      map[uint32]*outputState
+	pending      map[uint32]*outputState
+	knownWindows map[string]ipc.Window
+
+	toplevelMgr *foreign_toplevel_v1.ForeignToplevelManagerV1
+	toplevels   map[uint32]*toplevelInfo
 
 	eventCh    chan ipc.Event
 	subscribed bool
@@ -62,9 +84,11 @@ func New() (*Mangowc, error) {
 	}
 
 	m := &Mangowc{
-		display: display,
-		outputs: make(map[uint32]*outputState),
-		pending: make(map[uint32]*outputState),
+		display:      display,
+		outputs:      make(map[uint32]*outputState),
+		pending:      make(map[uint32]*outputState),
+		knownWindows: make(map[string]ipc.Window),
+		toplevels:    make(map[uint32]*toplevelInfo),
 	}
 
 	// Capture protocol errors from the compositor.
@@ -126,6 +150,17 @@ func New() (*Mangowc, error) {
 				st.name = ne.Name
 				pend.name = ne.Name
 			})
+
+		case "zwlr_foreign_toplevel_manager_v1":
+			tmgr := foreign_toplevel_v1.NewForeignToplevelManagerV1(display.Context())
+			ver := e.Version
+			if ver > 3 {
+				ver = 3
+			}
+			if err := registry.Bind(e.Name, e.Interface, ver, tmgr); err != nil {
+				return
+			}
+			m.toplevelMgr = tmgr
 		}
 	})
 
@@ -133,6 +168,10 @@ func New() (*Mangowc, error) {
 	if err := m.roundtrip(); err != nil {
 		display.Context().Close()
 		return nil, fmt.Errorf("roundtrip 1: %w", err)
+	}
+
+	if m.toplevelMgr != nil {
+		m.setupToplevelHandlers()
 	}
 
 	// Roundtrip 2: receive initial events for bound globals (tags, layouts, output names)
@@ -164,6 +203,14 @@ func New() (*Mangowc, error) {
 	if err := m.roundtrip(); err != nil {
 		display.Context().Close()
 		return nil, fmt.Errorf("roundtrip 3: %w", err)
+	}
+
+	// Roundtrip 4: receive initial foreign-toplevel data (if available)
+	if m.toplevelMgr != nil {
+		if err := m.roundtrip(); err != nil {
+			display.Context().Close()
+			return nil, fmt.Errorf("roundtrip 4: %w", err)
+		}
 	}
 
 	for oid, st := range m.outputs {
@@ -202,6 +249,23 @@ func parseWorkspaceID(id string) (int, error) {
 		return 0, fmt.Errorf("workspace id must be >= 1")
 	}
 	return tagNum, nil
+}
+
+// normalizeDirection converts short direction codes (l, r, u, d) to the full
+// words that MangoWC's parse_direction() expects (left, right, up, down).
+func normalizeDirection(dir string) string {
+	switch strings.ToLower(dir) {
+	case "l", "left":
+		return "left"
+	case "r", "right":
+		return "right"
+	case "u", "up":
+		return "up"
+	case "d", "down":
+		return "down"
+	default:
+		return dir
+	}
 }
 
 func (m *Mangowc) setupOutputHandlers(oid uint32, ipcOut *dwlipc.IpcOutputV2) {
@@ -310,9 +374,32 @@ func (m *Mangowc) setupOutputHandlers(oid uint32, ipcOut *dwlipc.IpcOutputV2) {
 				Payload: map[string]interface{}{"title": c.title, "monitor": monName, "id": winID}})
 		}
 		if c.appid != oldAppid {
-			// New focused window (appid changed = different window got focus)
+			newWin := ipc.Window{
+				ID:         winID,
+				Title:      c.title,
+				Class:      c.appid,
+				MonitorID:  monName,
+				Floating:   c.floating,
+				Fullscreen: c.fullscreen,
+				X:          int(c.x),
+				Y:          int(c.y),
+				Width:      int(c.width),
+				Height:     int(c.height),
+			}
+			// Track this window; emit WindowCreated if never seen before
+			m.mu.Lock()
+			if _, exists := m.knownWindows[winID]; !exists {
+				m.knownWindows[winID] = newWin
+				m.mu.Unlock()
+				m.emit(ch, ipc.Event{Type: ipc.EventWindowCreated, Timestamp: now,
+					Window:  &newWin,
+					Payload: map[string]interface{}{"id": winID, "class": c.appid, "title": c.title, "monitor": monName}})
+			} else {
+				m.knownWindows[winID] = newWin
+				m.mu.Unlock()
+			}
 			m.emit(ch, ipc.Event{Type: ipc.EventWindowFocused, Timestamp: now,
-				Window:  &ipc.Window{ID: winID, Title: c.title, Class: c.appid, MonitorID: monName},
+				Window:  &newWin,
 				Payload: map[string]interface{}{"class": c.appid, "title": c.title, "monitor": monName}})
 		}
 		if c.fullscreen != oldFullscreen {
@@ -323,6 +410,126 @@ func (m *Mangowc) setupOutputHandlers(oid uint32, ipcOut *dwlipc.IpcOutputV2) {
 			m.emit(ch, ipc.Event{Type: ipc.EventFocusedMonitorChanged, Timestamp: now,
 				Payload: map[string]interface{}{"monitor": monName, "active": c.active}})
 		}
+	})
+}
+
+func (m *Mangowc) setupToplevelHandlers() {
+	m.toplevelMgr.SetToplevelHandler(func(e foreign_toplevel_v1.ForeignToplevelManagerV1ToplevelEvent) {
+		handle := e.Toplevel
+		hid := handle.ID()
+		info := &toplevelInfo{handle: handle}
+		m.mu.Lock()
+		m.toplevels[hid] = info
+		m.mu.Unlock()
+
+		handle.SetTitleHandler(func(te foreign_toplevel_v1.ForeignToplevelHandleV1TitleEvent) {
+			m.mu.Lock()
+			info.pendTitle = te.Title
+			m.mu.Unlock()
+		})
+		handle.SetAppIdHandler(func(ae foreign_toplevel_v1.ForeignToplevelHandleV1AppIdEvent) {
+			m.mu.Lock()
+			info.pendAppId = ae.AppId
+			m.mu.Unlock()
+		})
+		handle.SetOutputEnterHandler(func(oe foreign_toplevel_v1.ForeignToplevelHandleV1OutputEnterEvent) {
+			if oe.Output == nil {
+				return
+			}
+			m.mu.Lock()
+			for _, out := range m.outputs {
+				if out.wlOutput != nil && out.wlOutput.ID() == oe.Output.ID() {
+					info.pendOutputName = out.name
+					break
+				}
+			}
+			m.mu.Unlock()
+		})
+		handle.SetStateHandler(func(se foreign_toplevel_v1.ForeignToplevelHandleV1StateEvent) {
+			m.mu.Lock()
+			info.pendActivated = false
+			info.pendMaximized = false
+			info.pendFullscreen = false
+			for _, s := range se.State {
+				switch s {
+				case foreign_toplevel_v1.ToplevelStateActivated:
+					info.pendActivated = true
+				case foreign_toplevel_v1.ToplevelStateMaximized:
+					info.pendMaximized = true
+				case foreign_toplevel_v1.ToplevelStateFullscreen:
+					info.pendFullscreen = true
+				}
+			}
+			m.mu.Unlock()
+		})
+		handle.SetDoneHandler(func(foreign_toplevel_v1.ForeignToplevelHandleV1DoneEvent) {
+			m.mu.Lock()
+			oldTitle := info.title
+			oldAppId := info.appId
+
+			info.title = info.pendTitle
+			info.appId = info.pendAppId
+			info.outputName = info.pendOutputName
+			info.activated = info.pendActivated
+			info.maximized = info.pendMaximized
+			info.fullscreen = info.pendFullscreen
+
+			ch := m.eventCh
+			isNew := oldAppId == "" && info.appId != ""
+			winID := fmt.Sprintf("%d", hid)
+			m.mu.Unlock()
+
+			if ch == nil {
+				return
+			}
+			now := time.Now().Unix()
+
+			w := ipc.Window{
+				ID:         winID,
+				Title:      info.title,
+				Class:      info.appId,
+				MonitorID:  info.outputName,
+				Fullscreen: info.fullscreen,
+				Maximized:  info.maximized,
+			}
+
+			if isNew {
+				m.emit(ch, ipc.Event{Type: ipc.EventWindowCreated, Timestamp: now,
+					Window:  &w,
+					Payload: map[string]interface{}{"id": winID, "class": info.appId, "title": info.title, "monitor": info.outputName}})
+			}
+			if info.activated {
+				m.emit(ch, ipc.Event{Type: ipc.EventWindowFocused, Timestamp: now,
+					Window:  &w,
+					Payload: map[string]interface{}{"class": info.appId, "title": info.title, "monitor": info.outputName}})
+			}
+			if info.title != oldTitle && oldTitle != "" {
+				m.emit(ch, ipc.Event{Type: ipc.EventWindowTitleChanged, Timestamp: now,
+					Window:  &w,
+					Payload: map[string]interface{}{"title": info.title, "monitor": info.outputName, "id": winID}})
+			}
+		})
+		handle.SetClosedHandler(func(foreign_toplevel_v1.ForeignToplevelHandleV1ClosedEvent) {
+			m.mu.Lock()
+			info := m.toplevels[hid]
+			delete(m.toplevels, hid)
+			ch := m.eventCh
+			m.mu.Unlock()
+
+			if ch == nil || info == nil {
+				return
+			}
+			winID := fmt.Sprintf("%d", hid)
+			w := ipc.Window{
+				ID:        winID,
+				Title:     info.title,
+				Class:     info.appId,
+				MonitorID: info.outputName,
+			}
+			m.emit(ch, ipc.Event{Type: ipc.EventWindowClosed, Timestamp: time.Now().Unix(),
+				Window:  &w,
+				Payload: map[string]interface{}{"id": winID, "class": info.appId, "title": info.title}})
+		})
 	})
 }
 
@@ -367,12 +574,97 @@ func (m *Mangowc) activeIpcOutputLocked() *dwlipc.IpcOutputV2 {
 }
 
 func (m *Mangowc) ListWindows() ([]ipc.Window, error) {
-	return nil, ipc.ErrNotSupported
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.toplevelMgr != nil && len(m.toplevels) > 0 {
+		var windows []ipc.Window
+		for hid, info := range m.toplevels {
+			if info.appId == "" {
+				continue
+			}
+			wsID := ""
+			for _, out := range m.outputs {
+				if out.name == info.outputName {
+					for i, t := range out.tags {
+						if t.state&uint32(dwlipc.IpcOutputV2TagStateActive) != 0 {
+							wsID = makeWorkspaceID(out.name, i+1)
+							break
+						}
+					}
+					break
+				}
+			}
+			windows = append(windows, ipc.Window{
+				ID:          fmt.Sprintf("%d", hid),
+				Title:       info.title,
+				Class:       info.appId,
+				MonitorID:   info.outputName,
+				WorkspaceID: wsID,
+				Fullscreen:  info.fullscreen,
+				Maximized:   info.maximized,
+
+			})
+		}
+		return windows, nil
+	}
+
+	// Fallback: dwl-ipc only reports the focused window per output
+	var windows []ipc.Window
+	for _, out := range m.outputs {
+		if out.appid == "" {
+			continue
+		}
+		winID := makeWindowID(out.name, out.appid)
+		wsID := ""
+		for i, t := range out.tags {
+			if t.state&uint32(dwlipc.IpcOutputV2TagStateActive) != 0 {
+				wsID = makeWorkspaceID(out.name, i+1)
+				break
+			}
+		}
+		w := ipc.Window{
+			ID:          winID,
+			Title:       out.title,
+			Class:       out.appid,
+			MonitorID:   out.name,
+			WorkspaceID: wsID,
+			Floating:    out.floating,
+			Fullscreen:  out.fullscreen,
+			X:           int(out.x),
+			Y:           int(out.y),
+			Width:       int(out.width),
+			Height:      int(out.height),
+		}
+		windows = append(windows, w)
+		m.knownWindows[winID] = w
+	}
+	for id, kw := range m.knownWindows {
+		found := false
+		for _, w := range windows {
+			if w.ID == id {
+				found = true
+				break
+			}
+		}
+		if !found {
+			windows = append(windows, kw)
+		}
+	}
+	return windows, nil
 }
 
 func (m *Mangowc) ActiveWindow() (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	if m.toplevelMgr != nil {
+		for hid, info := range m.toplevels {
+			if info.activated {
+				return fmt.Sprintf("%d", hid), nil
+			}
+		}
+	}
 
 	out := m.activeOutputLocked()
 	if out == nil {
@@ -400,7 +692,7 @@ func (m *Mangowc) FocusDir(direction string) error {
 	if ipcOut == nil {
 		return ipc.ErrCompositorNotAvailable
 	}
-	return ipcOut.DispatchCmd("focusdir", direction, "", "", "", "")
+	return ipcOut.DispatchCmd("focusdir", normalizeDirection(direction), "", "", "", "")
 }
 
 func (m *Mangowc) CloseWindow(id string) error {
@@ -422,7 +714,7 @@ func (m *Mangowc) MoveWindow(id string, direction string) error {
 	if ipcOut == nil {
 		return ipc.ErrCompositorNotAvailable
 	}
-	return ipcOut.DispatchCmd("movewin", direction, "", "", "", "")
+	return ipcOut.DispatchCmd("smartmovewin", normalizeDirection(direction), "", "", "", "")
 }
 
 func (m *Mangowc) ResizeWindow(id string, width, height int) error {
@@ -433,7 +725,7 @@ func (m *Mangowc) ResizeWindow(id string, width, height int) error {
 	if ipcOut == nil {
 		return ipc.ErrCompositorNotAvailable
 	}
-	return ipcOut.DispatchCmd("resizewin", fmt.Sprintf("%d,%d", width, height), "", "", "", "")
+	return ipcOut.DispatchCmd("resizewin", fmt.Sprintf("%d", width), fmt.Sprintf("%d", height), "", "", "")
 }
 
 func (m *Mangowc) ToggleFloating(id string) error {
@@ -508,7 +800,7 @@ func (m *Mangowc) MoveWindowPixel(id string, x, y int) error {
 	if ipcOut == nil {
 		return ipc.ErrCompositorNotAvailable
 	}
-	return ipcOut.DispatchCmd("movewin", fmt.Sprintf("%d,%d", x, y), "", "", "", "")
+	return ipcOut.DispatchCmd("movewin", fmt.Sprintf("%d", x), fmt.Sprintf("%d", y), "", "", "")
 }
 
 func (m *Mangowc) ListWorkspaces() ([]ipc.Workspace, error) {

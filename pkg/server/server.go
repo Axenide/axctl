@@ -89,6 +89,20 @@ func (s *Server) watchEvents() {
 				s.broadcastEvent("Event.WindowClosed", map[string]string{"ID": strID})
 			}
 		case ipc.EventWindowFocused:
+			// Track window in cache if not already present (helps MangoWC accumulate windows)
+			if e.Window != nil && e.Window.ID != "" {
+				existing := s.cache.GetWindows()
+				found := false
+				for _, w := range existing {
+					if w.ID == e.Window.ID {
+						found = true
+						break
+					}
+				}
+				if !found {
+					s.cache.AddWindow(*e.Window)
+				}
+			}
 			if class, ok := e.Payload["class"].(string); ok {
 				if title, ok := e.Payload["title"].(string); ok {
 					s.broadcastEvent("Event.WindowFocused", map[string]string{"Class": class, "Title": title})
