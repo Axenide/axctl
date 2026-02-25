@@ -16,14 +16,21 @@ type Server struct {
 	cache      *ipc.StateCache
 	clients    map[net.Conn]struct{}
 	clientsMu  sync.RWMutex
+	idleMgr    *IdleManager
 }
 
 func New(c ipc.Compositor, path string) *Server {
+	idleMgr, err := NewIdleManager()
+	if err != nil {
+		fmt.Printf("Warning: Failed to initialize Wayland Idle Manager: %v\n", err)
+	}
+
 	s := &Server{
 		compositor: c,
 		socketPath: path,
 		cache:      ipc.NewStateCache(),
 		clients:    make(map[net.Conn]struct{}),
+		idleMgr:    idleMgr,
 	}
 	s.initCache()
 	go s.watchEvents()
@@ -408,6 +415,102 @@ func (s *Server) handleConnection(conn net.Conn) {
 			x, y, err = s.compositor.GetCursorPosition()
 			if err == nil {
 				result = map[string]int{"x": x, "y": y}
+			}
+		case "System.IdleInhibit":
+			if s.idleMgr == nil {
+				resp.Error = "Idle management not supported on this session"
+				break
+			}
+			var p struct {
+				On bool `json:"on"`
+			}
+			json.Unmarshal(req.Params, &p)
+			err = s.idleMgr.Inhibit(p.On)
+		case "System.IdleWait":
+			if s.idleMgr == nil {
+				resp.Error = "Idle management not supported on this session"
+				break
+			}
+			var p struct {
+				TimeoutMs uint32 `json:"timeout_ms"`
+			}
+			json.Unmarshal(req.Params, &p)
+			err = s.idleMgr.WaitIdle(p.TimeoutMs)
+		case "System.ResumeWait":
+			if s.idleMgr == nil {
+				resp.Error = "Idle management not supported on this session"
+				break
+			}
+			var p struct {
+				TimeoutMs uint32 `json:"timeout_ms"`
+			}
+			json.Unmarshal(req.Params, &p)
+			err = s.idleMgr.WaitResume(p.TimeoutMs)
+		case "System.InputIdleWait":
+			if s.idleMgr == nil {
+				resp.Error = "Idle management not supported on this session"
+				break
+			}
+			var p struct {
+				TimeoutMs uint32 `json:"timeout_ms"`
+			}
+			json.Unmarshal(req.Params, &p)
+			err = s.idleMgr.WaitInputIdle(p.TimeoutMs)
+		case "System.InputResumeWait":
+			if s.idleMgr == nil {
+				resp.Error = "Idle management not supported on this session"
+				break
+			}
+			var p struct {
+				TimeoutMs uint32 `json:"timeout_ms"`
+			}
+			json.Unmarshal(req.Params, &p)
+			err = s.idleMgr.WaitInputResume(p.TimeoutMs)
+		case "System.IsIdle":
+			if s.idleMgr == nil {
+				resp.Error = "Idle management not supported on this session"
+				break
+			}
+			var p struct {
+				TimeoutMs uint32 `json:"timeout_ms"`
+			}
+			json.Unmarshal(req.Params, &p)
+			isIdle, e := s.idleMgr.IsIdle(p.TimeoutMs)
+			err = e
+			if err == nil {
+				if isIdle {
+					result = "true"
+				} else {
+					result = "false"
+				}
+			}
+		case "System.IsInhibited":
+			if s.idleMgr == nil {
+				resp.Error = "Idle management not supported on this session"
+				break
+			}
+			if s.idleMgr.IsInhibited() {
+				result = "true"
+			} else {
+				result = "false"
+			}
+		case "System.IsInputIdle":
+			if s.idleMgr == nil {
+				resp.Error = "Idle management not supported on this session"
+				break
+			}
+			var p struct {
+				TimeoutMs uint32 `json:"timeout_ms"`
+			}
+			json.Unmarshal(req.Params, &p)
+			isIdle, e := s.idleMgr.IsInputIdle(p.TimeoutMs)
+			err = e
+			if err == nil {
+				if isIdle {
+					result = "true"
+				} else {
+					result = "false"
+				}
 			}
 		case "System.Exit":
 			err = s.compositor.Exit()

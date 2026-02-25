@@ -751,9 +751,9 @@ func (m *Mangowc) SetConfig(key string, value interface{}) error {
 	case "border.width":
 		return ipcOut.DispatchCmd("setoption", "borderpx", v, "", "", "")
 	case "border.active_color":
-		return ipcOut.DispatchCmd("setoption", "focuscolor", ipc.FirstColor(v), "", "", "")
+		return ipcOut.DispatchCmd("setoption", "focuscolor", ipc.MangoColor(v), "", "", "")
 	case "border.inactive_color":
-		return ipcOut.DispatchCmd("setoption", "bordercolor", ipc.FirstColor(v), "", "", "")
+		return ipcOut.DispatchCmd("setoption", "bordercolor", ipc.MangoColor(v), "", "", "")
 	case "opacity.active":
 		return ipcOut.DispatchCmd("setoption", "focused_opacity", v, "", "", "")
 	case "opacity.inactive":

@@ -88,6 +88,14 @@ func usage() {
 	fmt.Println("    get-cursor-position     Get absolute cursor position")
 	fmt.Println("    switch-keyboard-layout [next|prev] Switch keyboard layout")
 	fmt.Println("    set-keyboard-layouts <layouts> [variants] Set keyboard layouts (e.g. \"us,es\" \"altgr-intl,\")")
+	fmt.Println("    idle-inhibit <0|1>      Inhibit or allow idle/sleep")
+	fmt.Println("    idle-wait <ms>          Block until system is idle for <ms> milliseconds (honors inhibitors)")
+	fmt.Println("    resume-wait <ms>        Block until system resumes from <ms> milliseconds of idle")
+	fmt.Println("    is-idle <ms>            Check if system is currently idle for <ms> milliseconds (returns true/false)")
+	fmt.Println("    input-idle-wait <ms>    Block until physical input is idle (ignores inhibitors)")
+	fmt.Println("    input-resume-wait <ms>  Block until physical input resumes")
+	fmt.Println("    is-input-idle <ms>      Check if physical input is idle (returns true/false)")
+	fmt.Println("    is-inhibited            Check if axctl has idle inhibited (returns true/false)")
 	fmt.Println("    exit                    Exit compositor")
 }
 
@@ -455,6 +463,18 @@ func handleRPC(category string, args []string) {
 		if len(args) > 2 {
 			params["variants"] = args[2]
 		}
+	case "System.IdleInhibit":
+		if len(args) > 1 {
+			params["on"] = args[1] == "1"
+		}
+	case "System.IdleWait", "System.ResumeWait", "System.IsIdle", "System.InputIdleWait", "System.InputResumeWait", "System.IsInputIdle":
+		if len(args) > 1 {
+			var ms int
+			fmt.Sscanf(args[1], "%d", &ms)
+			params["timeout_ms"] = ms
+		}
+	case "System.IsInhibited":
+		// No args needed
 	}
 
 	socketPath := fmt.Sprintf("/tmp/axctl-%d.sock", os.Getuid())
