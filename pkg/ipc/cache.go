@@ -48,6 +48,31 @@ func (c *StateCache) UpdateWindowTitle(id, title string) {
 	}
 }
 
+func (c *StateCache) UpdateWindowWorkspace(id, workspaceID, monitorID string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for i, w := range c.windows {
+		if w.ID == id {
+			c.windows[i].WorkspaceID = workspaceID
+			if monitorID != "" {
+				c.windows[i].MonitorID = monitorID
+			}
+			break
+		}
+	}
+}
+
+func (c *StateCache) UpdateWindowState(id string, isFullscreen bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for i, w := range c.windows {
+		if w.ID == id {
+			c.windows[i].Fullscreen = isFullscreen
+			break
+		}
+	}
+}
+
 func (c *StateCache) SetWindows(w []Window) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
