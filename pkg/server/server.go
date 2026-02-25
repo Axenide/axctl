@@ -202,19 +202,28 @@ func (s *Server) handleConnection(conn net.Conn) {
 			var p struct {
 				ID string `json:"id"`
 			}
-			json.Unmarshal(req.Params, &p)
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
 			err = s.compositor.FocusWindow(p.ID)
 		case "Window.FocusDir":
 			var p struct {
 				Direction string `json:"direction"`
 			}
-			json.Unmarshal(req.Params, &p)
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
 			err = s.compositor.FocusDir(p.Direction)
 		case "Window.Close":
 			var p struct {
 				ID string `json:"id"`
 			}
-			json.Unmarshal(req.Params, &p)
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
 			id, _ := s.resolveID(p.ID)
 			err = s.compositor.CloseWindow(id)
 		case "Window.Move":
@@ -222,7 +231,10 @@ func (s *Server) handleConnection(conn net.Conn) {
 				ID        string `json:"id"`
 				Direction string `json:"direction"`
 			}
-			json.Unmarshal(req.Params, &p)
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
 			id, _ := s.resolveID(p.ID)
 			err = s.compositor.MoveWindow(id, p.Direction)
 		case "Window.Resize":
@@ -231,14 +243,20 @@ func (s *Server) handleConnection(conn net.Conn) {
 				Width  int    `json:"width"`
 				Height int    `json:"height"`
 			}
-			json.Unmarshal(req.Params, &p)
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
 			id, _ := s.resolveID(p.ID)
 			err = s.compositor.ResizeWindow(id, p.Width, p.Height)
 		case "Window.ToggleFloating":
 			var p struct {
 				ID string `json:"id"`
 			}
-			json.Unmarshal(req.Params, &p)
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
 			id, _ := s.resolveID(p.ID)
 			err = s.compositor.ToggleFloating(id)
 		case "Window.Fullscreen":
@@ -246,7 +264,10 @@ func (s *Server) handleConnection(conn net.Conn) {
 				ID    string `json:"id"`
 				State bool   `json:"state"`
 			}
-			json.Unmarshal(req.Params, &p)
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
 			id, _ := s.resolveID(p.ID)
 			err = s.compositor.SetFullscreen(id, p.State)
 		case "Window.Maximize":
@@ -254,7 +275,10 @@ func (s *Server) handleConnection(conn net.Conn) {
 				ID    string `json:"id"`
 				State bool   `json:"state"`
 			}
-			json.Unmarshal(req.Params, &p)
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
 			id, _ := s.resolveID(p.ID)
 			err = s.compositor.SetMaximized(id, p.State)
 		case "Window.Pin":
@@ -262,21 +286,30 @@ func (s *Server) handleConnection(conn net.Conn) {
 				ID    string `json:"id"`
 				State bool   `json:"state"`
 			}
-			json.Unmarshal(req.Params, &p)
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
 			id, _ := s.resolveID(p.ID)
 			err = s.compositor.PinWindow(id, p.State)
 		case "Window.ToggleGroup":
 			var p struct {
 				ID string `json:"id"`
 			}
-			json.Unmarshal(req.Params, &p)
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
 			id, _ := s.resolveID(p.ID)
 			err = s.compositor.ToggleGroup(id)
 		case "Window.GroupNav":
 			var p struct {
 				Direction string `json:"direction"`
 			}
-			json.Unmarshal(req.Params, &p)
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
 			err = s.compositor.GroupNav(p.Direction)
 		case "Window.LayoutProp":
 			var p struct {
@@ -284,7 +317,10 @@ func (s *Server) handleConnection(conn net.Conn) {
 				Key   string `json:"key"`
 				Value string `json:"value"`
 			}
-			json.Unmarshal(req.Params, &p)
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
 			id, _ := s.resolveID(p.ID)
 			err = s.compositor.SetLayoutProperty(id, p.Key, p.Value)
 		case "Window.MovePixel":
@@ -293,7 +329,10 @@ func (s *Server) handleConnection(conn net.Conn) {
 				X  int    `json:"x"`
 				Y  int    `json:"y"`
 			}
-			json.Unmarshal(req.Params, &p)
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
 			id, _ := s.resolveID(p.ID)
 			err = s.compositor.MoveWindowPixel(id, p.X, p.Y)
 		case "Window.MoveToWorkspaceSilent":
@@ -301,7 +340,10 @@ func (s *Server) handleConnection(conn net.Conn) {
 				WindowID    string `json:"window_id"`
 				WorkspaceID string `json:"workspace_id"`
 			}
-			json.Unmarshal(req.Params, &p)
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
 			id, _ := s.resolveID(p.WindowID)
 			err = s.compositor.MoveToWorkspaceSilent(id, p.WorkspaceID)
 
@@ -317,21 +359,30 @@ func (s *Server) handleConnection(conn net.Conn) {
 			var p struct {
 				ID string `json:"id"`
 			}
-			json.Unmarshal(req.Params, &p)
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
 			err = s.compositor.SwitchWorkspace(p.ID)
 		case "Workspace.MoveTo":
 			var p struct {
 				WindowID    string `json:"window_id"`
 				WorkspaceID string `json:"workspace_id"`
 			}
-			json.Unmarshal(req.Params, &p)
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
 			id, _ := s.resolveID(p.WindowID)
 			err = s.compositor.MoveToWorkspace(id, p.WorkspaceID)
 		case "Workspace.ToggleSpecial":
 			var p struct {
 				Name string `json:"name"`
 			}
-			json.Unmarshal(req.Params, &p)
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
 			err = s.compositor.ToggleSpecialWorkspace(p.Name)
 
 		case "Monitor.List":
@@ -340,14 +391,20 @@ func (s *Server) handleConnection(conn net.Conn) {
 			var p struct {
 				ID string `json:"id"`
 			}
-			json.Unmarshal(req.Params, &p)
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
 			err = s.compositor.FocusMonitor(p.ID)
 		case "Monitor.MoveTo":
 			var p struct {
 				WindowID  string `json:"window_id"`
 				MonitorID string `json:"monitor_id"`
 			}
-			json.Unmarshal(req.Params, &p)
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
 			id, _ := s.resolveID(p.WindowID)
 			err = s.compositor.MoveToMonitor(id, p.MonitorID)
 		case "Monitor.SetDpms":
@@ -355,34 +412,49 @@ func (s *Server) handleConnection(conn net.Conn) {
 				MonitorID string `json:"monitor_id"`
 				On        bool   `json:"on"`
 			}
-			json.Unmarshal(req.Params, &p)
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
 			err = s.compositor.SetDpms(p.MonitorID, p.On)
 
 		case "Layout.Set":
 			var p struct {
 				Name string `json:"name"`
 			}
-			json.Unmarshal(req.Params, &p)
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
 			err = s.compositor.SetLayout(p.Name)
 
 		case "Config.Get":
 			var p struct {
 				Key string `json:"key"`
 			}
-			json.Unmarshal(req.Params, &p)
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
 			result, err = s.compositor.GetConfig(p.Key)
 		case "Config.Set":
 			var p struct {
 				Key   string      `json:"key"`
 				Value interface{} `json:"value"`
 			}
-			json.Unmarshal(req.Params, &p)
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
 			err = s.compositor.SetConfig(p.Key, p.Value)
 		case "Config.Batch":
 			var p struct {
 				Configs map[string]interface{} `json:"configs"`
 			}
-			json.Unmarshal(req.Params, &p)
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
 			err = s.compositor.BatchConfig(p.Configs)
 		case "Config.Reload":
 			err = s.compositor.ReloadConfig()
@@ -394,21 +466,30 @@ func (s *Server) handleConnection(conn net.Conn) {
 				Key     string `json:"key"`
 				Command string `json:"command"`
 			}
-			json.Unmarshal(req.Params, &p)
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
 			err = s.compositor.BindKey(p.Mods, p.Key, p.Command)
 		case "Config.UnbindKey":
 			var p struct {
 				Mods string `json:"mods"`
 				Key  string `json:"key"`
 			}
-			json.Unmarshal(req.Params, &p)
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
 			err = s.compositor.UnbindKey(p.Mods, p.Key)
 
 		case "System.Execute":
 			var p struct {
 				Command string `json:"command"`
 			}
-			json.Unmarshal(req.Params, &p)
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
 			err = s.compositor.Execute(p.Command)
 		case "System.GetCursorPosition":
 			var x, y int
@@ -424,7 +505,10 @@ func (s *Server) handleConnection(conn net.Conn) {
 			var p struct {
 				On bool `json:"on"`
 			}
-			json.Unmarshal(req.Params, &p)
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
 			err = s.idleMgr.Inhibit(p.On)
 		case "System.IdleWait":
 			if s.idleMgr == nil {
@@ -434,7 +518,10 @@ func (s *Server) handleConnection(conn net.Conn) {
 			var p struct {
 				TimeoutMs uint32 `json:"timeout_ms"`
 			}
-			json.Unmarshal(req.Params, &p)
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
 			err = s.idleMgr.WaitIdle(p.TimeoutMs)
 		case "System.ResumeWait":
 			if s.idleMgr == nil {
@@ -444,7 +531,10 @@ func (s *Server) handleConnection(conn net.Conn) {
 			var p struct {
 				TimeoutMs uint32 `json:"timeout_ms"`
 			}
-			json.Unmarshal(req.Params, &p)
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
 			err = s.idleMgr.WaitResume(p.TimeoutMs)
 		case "System.InputIdleWait":
 			if s.idleMgr == nil {
@@ -454,7 +544,10 @@ func (s *Server) handleConnection(conn net.Conn) {
 			var p struct {
 				TimeoutMs uint32 `json:"timeout_ms"`
 			}
-			json.Unmarshal(req.Params, &p)
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
 			err = s.idleMgr.WaitInputIdle(p.TimeoutMs)
 		case "System.InputResumeWait":
 			if s.idleMgr == nil {
@@ -464,7 +557,10 @@ func (s *Server) handleConnection(conn net.Conn) {
 			var p struct {
 				TimeoutMs uint32 `json:"timeout_ms"`
 			}
-			json.Unmarshal(req.Params, &p)
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
 			err = s.idleMgr.WaitInputResume(p.TimeoutMs)
 		case "System.IsIdle":
 			if s.idleMgr == nil {
@@ -474,7 +570,10 @@ func (s *Server) handleConnection(conn net.Conn) {
 			var p struct {
 				TimeoutMs uint32 `json:"timeout_ms"`
 			}
-			json.Unmarshal(req.Params, &p)
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
 			isIdle, e := s.idleMgr.IsIdle(p.TimeoutMs)
 			err = e
 			if err == nil {
@@ -502,7 +601,10 @@ func (s *Server) handleConnection(conn net.Conn) {
 			var p struct {
 				TimeoutMs uint32 `json:"timeout_ms"`
 			}
-			json.Unmarshal(req.Params, &p)
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
 			isIdle, e := s.idleMgr.IsInputIdle(p.TimeoutMs)
 			err = e
 			if err == nil {
@@ -518,7 +620,10 @@ func (s *Server) handleConnection(conn net.Conn) {
 			var p struct {
 				Action string `json:"action"`
 			}
-			json.Unmarshal(req.Params, &p)
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
 			if p.Action == "" {
 				p.Action = "next"
 			}
@@ -528,7 +633,10 @@ func (s *Server) handleConnection(conn net.Conn) {
 				Layouts  string `json:"layouts"`
 				Variants string `json:"variants"`
 			}
-			json.Unmarshal(req.Params, &p)
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
 			err = s.compositor.SetKeyboardLayouts(p.Layouts, p.Variants)
 
 		default:
