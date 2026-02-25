@@ -95,6 +95,19 @@ func (s *Server) watchEvents() {
 				}
 			}
 		case ipc.EventWindowTitleChanged:
+			var id string
+			if addr, ok := e.Payload["address"].(string); ok {
+				id = addr
+			} else if idStr, ok := e.Payload["id"].(string); ok {
+				id = idStr
+			} else if idInt, ok := e.Payload["id"].(int); ok {
+				id = fmt.Sprintf("%d", idInt)
+			}
+			if id != "" {
+				if title, ok := e.Payload["title"].(string); ok {
+					s.cache.UpdateWindowTitle(id, title)
+				}
+			}
 			s.broadcastEvent("Event.WindowTitleChanged", e.Payload)
 		case ipc.EventWorkspaceChanged:
 			s.initCache()
@@ -104,8 +117,18 @@ func (s *Server) watchEvents() {
 				s.broadcastEvent("Event.WorkspaceChanged", e.Payload)
 			}
 		case ipc.EventWindowMoved:
-			if id, ok := e.Payload["address"].(string); ok {
+			var id string
+			if addr, ok := e.Payload["address"].(string); ok {
+				id = addr
+			} else if idStr, ok := e.Payload["id"].(string); ok {
+				id = idStr
+			} else if idInt, ok := e.Payload["id"].(int); ok {
+				id = fmt.Sprintf("%d", idInt)
+			}
+			if id != "" {
 				if ws, ok := e.Payload["workspace"].(string); ok {
+					monitor, _ := e.Payload["monitor"].(string)
+					s.cache.UpdateWindowWorkspace(id, ws, monitor)
 					s.broadcastEvent("Event.WindowMoved", map[string]string{"ID": id, "WorkspaceID": ws})
 				}
 			}
@@ -116,6 +139,23 @@ func (s *Server) watchEvents() {
 			s.initCache()
 			s.broadcastEvent("Event.ConfigReloaded", nil)
 		case ipc.EventFullscreenChanged:
+			var id string
+			if addr, ok := e.Payload["address"].(string); ok {
+				id = addr
+			} else if idStr, ok := e.Payload["id"].(string); ok {
+				id = idStr
+			} else if idInt, ok := e.Payload["id"].(int); ok {
+				id = fmt.Sprintf("%d", idInt)
+			}
+			if id != "" {
+				if fs, ok := e.Payload["fullscreen"].(bool); ok {
+					s.cache.UpdateWindowState(id, fs)
+				} else if fsStr, ok := e.Payload["fullscreen"].(string); ok {
+					s.cache.UpdateWindowState(id, fsStr == "true" || fsStr == "1")
+				} else if fsInt, ok := e.Payload["fullscreen"].(int); ok {
+					s.cache.UpdateWindowState(id, fsInt == 1)
+				}
+			}
 			s.broadcastEvent("Event.FullscreenChanged", e.Payload)
 		case ipc.EventFocusedMonitorChanged:
 			s.broadcastEvent("Event.FocusedMonitorChanged", e.Payload)
