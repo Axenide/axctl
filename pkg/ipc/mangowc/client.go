@@ -367,36 +367,7 @@ func (m *Mangowc) activeIpcOutputLocked() *dwlipc.IpcOutputV2 {
 }
 
 func (m *Mangowc) ListWindows() ([]ipc.Window, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	var windows []ipc.Window
-	for _, s := range m.outputs {
-		if s.appid == "" && s.title == "" {
-			continue
-		}
-		wsID := ""
-		for i, t := range s.tags {
-			if t.state&uint32(dwlipc.IpcOutputV2TagStateActive) != 0 {
-				wsID = strconv.Itoa(i + 1)
-				break
-			}
-		}
-		windows = append(windows, ipc.Window{
-			ID:          makeWindowID(s.name, s.appid),
-			Title:       s.title,
-			Class:       s.appid,
-			WorkspaceID: wsID,
-			MonitorID:   s.name,
-			Floating:    s.floating,
-			Fullscreen:  s.fullscreen,
-			X:           int(s.x),
-			Y:           int(s.y),
-			Width:       int(s.width),
-			Height:      int(s.height),
-		})
-	}
-	return windows, nil
+	return nil, ipc.ErrNotSupported
 }
 
 func (m *Mangowc) ActiveWindow() (string, error) {
