@@ -585,9 +585,10 @@ func (m *Mangowc) ListWindows() ([]ipc.Window, error) {
 			if info.appId == "" {
 				continue
 			}
-			// Update cached workspace ID only if the window is currently focused (activated)
-			// or if it doesn't have one yet (newly created)
-			if info.activated || info.cachedWsID == "" {
+			// Update cached workspace ID only if it doesn't have one yet (newly created)
+			// Because of race conditions between wlr-foreign-toplevel and dwl-ipc, we CANNOT trust info.activated 
+			// during workspace switches. If we update it here, it might grab the newly switched tag instead of its own!
+			if info.cachedWsID == "" {
 				for _, out := range m.outputs {
 					if out.name == info.outputName {
 						for i, t := range out.tags {
@@ -643,6 +644,10 @@ func (m *Mangowc) ListWindows() ([]ipc.Window, error) {
 			Height:      int(out.height),
 		}
 		windows = append(windows, w)
+		
+		// Update cache, but preserve historical WorkspaceID if it's inactive?
+		// No, if it's in out.appid, it IS the active window for this output.
+		// So we SHOULD update its WorkspaceID to wsID because it's actively focused here!
 		m.knownWindows[winID] = w
 	}
 	for id, kw := range m.knownWindows {
