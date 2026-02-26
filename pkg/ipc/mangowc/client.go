@@ -29,6 +29,7 @@ type outputState struct {
 	title      string
 	appid      string
 	fullscreen bool
+	cachedWsID string
 	floating   bool
 	x, y       int32
 	width      int32
@@ -48,6 +49,7 @@ type toplevelInfo struct {
 	activated  bool
 	maximized  bool
 	fullscreen bool
+	cachedWsID string
 	// pending state written by event handlers, committed on "done"
 	pendTitle      string
 	pendAppId      string
@@ -583,18 +585,22 @@ func (m *Mangowc) ListWindows() ([]ipc.Window, error) {
 			if info.appId == "" {
 				continue
 			}
-			wsID := ""
-			for _, out := range m.outputs {
-				if out.name == info.outputName {
-					for i, t := range out.tags {
-						if t.state&uint32(dwlipc.IpcOutputV2TagStateActive) != 0 {
-							wsID = makeWorkspaceID(out.name, i+1)
-							break
+			// Update cached workspace ID only if the window is currently focused (activated)
+			// or if it doesn't have one yet (newly created)
+			if info.activated || info.cachedWsID == "" {
+				for _, out := range m.outputs {
+					if out.name == info.outputName {
+						for i, t := range out.tags {
+							if t.state&uint32(dwlipc.IpcOutputV2TagStateActive) != 0 {
+								info.cachedWsID = makeWorkspaceID(out.name, i+1)
+								break
+							}
 						}
+						break
 					}
-					break
 				}
 			}
+			wsID := info.cachedWsID
 			windows = append(windows, ipc.Window{
 				ID:          fmt.Sprintf("%d", hid),
 				Title:       info.title,
