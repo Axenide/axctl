@@ -24,6 +24,7 @@ type Workspace struct {
 	Urgent         bool
 	Focused        bool
 	ActiveWindowID string
+	HasWindows     bool
 }
 
 // EventType represents the type of event occurring in the compositor.

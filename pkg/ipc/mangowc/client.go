@@ -825,6 +825,7 @@ func (m *Mangowc) ListWorkspaces() ([]ipc.Workspace, error) {
 				Name:      strconv.Itoa(tagNum),
 				MonitorID: out.name,
 				Active:    active,
+				HasWindows: t.clients > 0,
 				Layout:    layoutName,
 				Index:     i,
 				Urgent:    urgent,
