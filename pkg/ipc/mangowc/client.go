@@ -1063,6 +1063,10 @@ func (m *Mangowc) BatchConfig(configs map[string]interface{}) error {
 	return nil
 }
 
+func (m *Mangowc) BatchKeybinds(jsonPayload string) error {
+	return ipc.ErrNotSupported
+}
+
 func (m *Mangowc) ReloadConfig() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

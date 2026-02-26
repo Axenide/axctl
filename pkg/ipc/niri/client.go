@@ -545,6 +545,10 @@ func (n *Niri) BatchConfig(configs map[string]interface{}) error {
 	return nil
 }
 
+func (n *Niri) BatchKeybinds(jsonPayload string) error {
+	return ipc.ErrNotSupported
+}
+
 func (n *Niri) GetAnimations() (interface{}, error) {
 	return nil, ipc.ErrNotSupported
 }

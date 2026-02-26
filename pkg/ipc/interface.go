@@ -38,6 +38,7 @@ type Compositor interface {
 	GetConfig(key string) (interface{}, error)
 	SetConfig(key string, value interface{}) error
 	BatchConfig(configs map[string]interface{}) error
+	BatchKeybinds(jsonPayload string) error
 	ReloadConfig() error
 	GetAnimations() (interface{}, error)
 	GetCursorPosition() (int, int, error)

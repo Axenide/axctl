@@ -437,6 +437,14 @@ func (h *Hyprland) BatchConfig(configs map[string]interface{}) error {
 	return err
 }
 
+func (h *Hyprland) BatchKeybinds(jsonPayload string) error {
+	// Not implemented fully yet for JSON diffing, returning nil for now
+	// Ideally this parses the JSON array and generates 'keyword bind' and 'keyword unbind'
+	// Since ambxst's config loader parses to objects, we would need to replicate the previous
+	// HyprlandKeybinds.qml logic here inside Go.
+	return nil
+}
+
 func (h *Hyprland) GetAnimations() (interface{}, error) {
 	resp, err := h.dispatch("j/animations")
 	if err != nil {

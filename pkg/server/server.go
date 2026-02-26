@@ -510,6 +510,15 @@ func (s *Server) handleConnection(conn net.Conn) {
 				break
 			}
 			err = s.compositor.BatchConfig(p.Configs)
+		case "Config.KeybindsBatch":
+			var p struct {
+				Payload string `json:"payload"`
+			}
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
+			err = s.compositor.BatchKeybinds(p.Payload)
 		case "Config.Reload":
 			err = s.compositor.ReloadConfig()
 		case "Config.GetAnimations":
