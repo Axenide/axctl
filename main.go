@@ -28,7 +28,6 @@ func main() {
 		runDaemon()
 	case "subscribe":
 		runSubscribe()
-		runDaemon()
 	case "window", "workspace", "monitor", "layout", "config", "system":
 		if len(os.Args) < 3 {
 			usage()
@@ -83,6 +82,7 @@ func usage() {
 	fmt.Println("                                  opacity.active, opacity.inactive,")
 	fmt.Println("                                  blur.enabled, blur.size, blur.passes")
 	fmt.Println("    batch <json_string>     Batch apply configs")
+	fmt.Println("    apply <json_string>     Apply declarative universal config payload" )
 	fmt.Println("    get-animations          Get animation configs")
 	fmt.Println("    bind-key <mods> <key> <cmd> Bind a key")
 	fmt.Println("    unbind-key <mods> <key> Unbind a key")
@@ -100,6 +100,7 @@ func usage() {
 	fmt.Println("    input-resume-wait <ms>  Block until physical input resumes")
 	fmt.Println("    is-input-idle <ms>      Check if physical input is idle (returns true/false)")
 	fmt.Println("    is-inhibited            Check if axctl has idle inhibited (returns true/false)")
+	fmt.Println("    get-capabilities        Get compositor capabilities")
 	fmt.Println("    exit                    Exit compositor")
 }
 
@@ -292,16 +293,23 @@ func runSubscribe() {
 	conn, err := net.Dial("unix", socketPath)
 	if err != nil {
 		fmt.Printf("Error connecting to daemon: %v\n", err)
-		return
+		os.Exit(1)
 	}
 	defer conn.Close()
+
+	req := map[string]interface{}{
+		"id":     1,
+		"method": "System.Subscribe",
+		"params": map[string]interface{}{},
+	}
+	json.NewEncoder(conn).Encode(req)
 
 	dec := json.NewDecoder(conn)
 	for {
 		var msg json.RawMessage
 		if err := dec.Decode(&msg); err != nil {
 			fmt.Printf("Connection closed or error: %v\n", err)
-			return
+			os.Exit(1)
 		}
 		var notif struct {
 			JSONRPC string `json:"jsonrpc"`
@@ -453,6 +461,10 @@ func handleRPC(category string, args []string) {
 		if len(args) > 2 {
 			params["key"] = args[1]
 			params["value"] = args[2]
+		}
+case "Config.Apply":
+		if len(args) > 1 {
+			params["payload"] = args[1]
 		}
 	case "Config.Batch":
 		if len(args) > 1 {

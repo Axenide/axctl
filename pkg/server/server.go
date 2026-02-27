@@ -218,10 +218,6 @@ func (s *Server) resolveID(id string) (string, error) {
 
 func (s *Server) handleConnection(conn net.Conn) {
 	defer conn.Close()
-	s.clientsMu.Lock()
-	s.clients[conn] = struct{}{}
-	s.clientsMu.Unlock()
-
 	defer func() {
 		s.clientsMu.Lock()
 		delete(s.clients, conn)
@@ -501,6 +497,22 @@ func (s *Server) handleConnection(conn net.Conn) {
 				break
 			}
 			err = s.compositor.SetConfig(p.Key, p.Value)
+		case "Config.Apply":
+			var p struct {
+				Payload string `json:"payload"`
+			}
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
+			var payload ipc.ConfigUniversal
+			if err := json.Unmarshal([]byte(p.Payload), &payload); err != nil {
+				resp.Error = fmt.Sprintf("invalid json payload: %v", err)
+				break
+			}
+			handler := NewConfigHandler(s.compositor)
+			err = handler.ApplyConfig(payload)
+
 		case "Config.Batch":
 			var p struct {
 				Configs map[string]interface{} `json:"configs"`
@@ -701,6 +713,25 @@ func (s *Server) handleConnection(conn net.Conn) {
 				break
 			}
 			err = s.compositor.SetKeyboardLayouts(p.Layouts, p.Variants)
+		case "System.Subscribe":
+			s.clientsMu.Lock()
+			s.clients[conn] = struct{}{}
+			s.clientsMu.Unlock()
+			stateDump := map[string]interface{}{
+				"Windows":    s.cache.GetWindows(),
+				"Workspaces": s.cache.GetWorkspaces(),
+				"Monitors":   s.cache.GetMonitors(),
+			}
+			notif := Notification{
+				JSONRPC: "2.0",
+				Method:  "State.Dump",
+				Params:  stateDump,
+			}
+			if data, err := json.Marshal(notif); err == nil {
+				data = append(data, '\n')
+				conn.Write(data)
+			}
+			result = "subscribed"
 
 		default:
 			resp.Error = "method not found"
