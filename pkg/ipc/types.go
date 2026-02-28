@@ -1,30 +1,45 @@
 package ipc
 
 type Window struct {
-	ID            string
-	Title         string
-	Class         string
-	WorkspaceID   string
-	MonitorID     string
-	Floating      bool
-	Fullscreen    bool
-	Maximized     bool
-	Pinned        bool
-	X, Y          int
-	Width, Height int
+	ID           string                 `json:"id"`
+	Title        string                 `json:"title"`
+	AppID        string                 `json:"app_id"`
+	WorkspaceID  string                 `json:"workspace_id"`
+	IsFocused    bool                   `json:"is_focused"`
+	IsFloating   bool                   `json:"is_floating"`
+	IsFullscreen bool                   `json:"is_fullscreen"`
+	IsHidden     bool                   `json:"is_hidden"`
+	Metadata     map[string]interface{} `json:"metadata,omitempty"`
 }
 
 type Workspace struct {
-	ID             string
-	Name           string
-	MonitorID      string
-	Active         bool
-	Layout         string
-	Index          int
-	Urgent         bool
-	Focused        bool
-	ActiveWindowID string
-	HasWindows     bool
+	ID        string                 `json:"id"`
+	Name      string                 `json:"name"`
+	MonitorID string                 `json:"monitor_id"`
+	IsActive  bool                   `json:"is_active"`
+	IsEmpty   bool                   `json:"is_empty"`
+	Metadata  map[string]interface{} `json:"metadata,omitempty"`
+}
+
+type Monitor struct {
+	ID          string                 `json:"id"`
+	Name        string                 `json:"name"`
+	Description string                 `json:"description,omitempty"`
+	Width       int                    `json:"width"`
+	Height      int                    `json:"height"`
+	RefreshRate float64                `json:"refresh_rate,omitempty"`
+	Scale       float64                `json:"scale,omitempty"`
+	IsFocused   bool                   `json:"is_focused"`
+	Metadata    map[string]interface{} `json:"metadata,omitempty"`
+}
+
+type Capabilities struct {
+	Blur                bool `json:"blur"`
+	Shadows             bool `json:"shadows"`
+	Animations          bool `json:"animations"`
+	RoundedCorners      bool `json:"rounded_corners"`
+	WorkspacesSupported bool `json:"workspaces_supported"`
+	WindowsSupported    bool `json:"windows_supported"`
 }
 
 // EventType represents the type of event occurring in the compositor.

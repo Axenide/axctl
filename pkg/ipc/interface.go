@@ -39,6 +39,7 @@ type Compositor interface {
 	SetConfig(key string, value interface{}) error
 	BatchConfig(configs map[string]interface{}) error
 	BatchKeybinds(jsonPayload string) error
+	RawBatch(command string) error
 	ReloadConfig() error
 	GetAnimations() (interface{}, error)
 	GetCursorPosition() (int, int, error)
@@ -53,20 +54,7 @@ type Compositor interface {
 	SetKeyboardLayouts(layouts string, variants string) error
 
 	Subscribe() (<-chan Event, error)
-}
-
-type Monitor struct {
-	ID        string
-	Name      string
-	Width     int
-	Height    int
-	Refresh   float64
-	Active    bool
-	Workspace string
-	Scale     float64
-	X         int
-	Y         int
-	Transform int
+	GetCapabilities() (Capabilities, error)
 }
 
 var (

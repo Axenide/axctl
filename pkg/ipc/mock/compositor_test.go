@@ -37,7 +37,7 @@ func TestAddWindow(t *testing.T) {
 	w1 := ipc.Window{
 		ID:          "win1",
 		Title:       "Test Window",
-		Class:       "test",
+		AppID:       "test",
 		WorkspaceID: "ws1",
 	}
 
@@ -75,7 +75,7 @@ func TestAddWorkspace(t *testing.T) {
 func TestFocusWindowSuccess(t *testing.T) {
 	m := NewCompositor()
 
-	w := ipc.Window{ID: "win1", Title: "Test", Class: "test", WorkspaceID: "ws1"}
+	w := ipc.Window{ID: "win1", Title: "Test", AppID: "test", WorkspaceID: "ws1"}
 	m.AddWindow(w)
 
 	err := m.FocusWindow("win1")
@@ -113,7 +113,7 @@ func TestFocusWindowError(t *testing.T) {
 func TestCloseWindowSuccess(t *testing.T) {
 	m := NewCompositor()
 
-	w := ipc.Window{ID: "win1", Title: "Test", Class: "test", WorkspaceID: "ws1"}
+	w := ipc.Window{ID: "win1", Title: "Test", AppID: "test", WorkspaceID: "ws1"}
 	m.AddWindow(w)
 
 	err := m.CloseWindow("win1")
@@ -214,7 +214,7 @@ func TestEmitEvent(t *testing.T) {
 		Window: &ipc.Window{
 			ID:          "win1",
 			Title:       "New Window",
-			Class:       "app",
+			AppID:       "app",
 			WorkspaceID: "ws1",
 		},
 	}
@@ -237,8 +237,8 @@ func TestEmitEvent(t *testing.T) {
 func TestCallTracking(t *testing.T) {
 	m := NewCompositor()
 
-	w1 := ipc.Window{ID: "win1", Title: "Test1", Class: "test", WorkspaceID: "ws1"}
-	w2 := ipc.Window{ID: "win2", Title: "Test2", Class: "test", WorkspaceID: "ws1"}
+	w1 := ipc.Window{ID: "win1", Title: "Test1", AppID: "test", WorkspaceID: "ws1"}
+	w2 := ipc.Window{ID: "win2", Title: "Test2", AppID: "test", WorkspaceID: "ws1"}
 	m.AddWindow(w1)
 	m.AddWindow(w2)
 
@@ -266,7 +266,7 @@ func TestCallTracking(t *testing.T) {
 func TestReset(t *testing.T) {
 	m := NewCompositor()
 
-	w := ipc.Window{ID: "win1", Title: "Test", Class: "test", WorkspaceID: "ws1"}
+	w := ipc.Window{ID: "win1", Title: "Test", AppID: "test", WorkspaceID: "ws1"}
 	m.AddWindow(w)
 	m.ListWindows()
 	m.FocusWindow("win1")
@@ -292,7 +292,7 @@ func TestWindowToJSON(t *testing.T) {
 	w := ipc.Window{
 		ID:          "win1",
 		Title:       "Test Window",
-		Class:       "test",
+		AppID:       "test",
 		WorkspaceID: "ws1",
 	}
 

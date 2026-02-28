@@ -15,13 +15,13 @@ func TestExampleAdapter(t *testing.T) {
 	m.AddWindow(ipc.Window{
 		ID:          "0x1a2b",
 		Title:       "Firefox",
-		Class:       "firefox",
+		AppID:       "firefox",
 		WorkspaceID: "1",
 	})
 	m.AddWindow(ipc.Window{
 		ID:          "0x3c4d",
 		Title:       "Terminal",
-		Class:       "alacritty",
+		AppID:       "alacritty",
 		WorkspaceID: "1",
 	})
 	m.AddWorkspace(ipc.Workspace{
@@ -86,7 +86,7 @@ func TestExampleEventStreaming(t *testing.T) {
 		Window: &ipc.Window{
 			ID:          "new-win",
 			Title:       "New App",
-			Class:       "app",
+			AppID:       "app",
 			WorkspaceID: "1",
 		},
 	})
@@ -120,8 +120,8 @@ func TestExampleCallTracking(t *testing.T) {
 	m := NewCompositor()
 	defer m.Close()
 
-	w1 := ipc.Window{ID: "win1", Title: "App1", Class: "app1", WorkspaceID: "1"}
-	w2 := ipc.Window{ID: "win2", Title: "App2", Class: "app2", WorkspaceID: "2"}
+	w1 := ipc.Window{ID: "win1", Title: "App1", AppID: "app1", WorkspaceID: "1"}
+	w2 := ipc.Window{ID: "win2", Title: "App2", AppID: "app2", WorkspaceID: "2"}
 	m.AddWindow(w1)
 	m.AddWindow(w2)
 
@@ -154,7 +154,7 @@ func TestExampleJSONSerialization(t *testing.T) {
 	original := ipc.Window{
 		ID:          "0x123",
 		Title:       "Firefox",
-		Class:       "firefox",
+		AppID:       "firefox",
 		WorkspaceID: "1",
 	}
 

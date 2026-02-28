@@ -40,21 +40,20 @@ func New(c ipc.Compositor, path string) *Server {
 func (s *Server) initCache() {
 	w, err := s.compositor.ListWindows()
 	if err == nil {
-		fmt.Printf("[Server] Cached %d windows\n", len(w))
 		s.cache.SetWindows(w)
-	} else {
-		fmt.Printf("[Server] Error caching windows: %v\n", err)
+	}
+
+	if activeID, err := s.compositor.ActiveWindow(); err == nil && activeID != "" {
+		s.cache.MarkWindowFocused(activeID)
 	}
 
 	ws, err := s.compositor.ListWorkspaces()
 	if err == nil {
-		fmt.Printf("[Server] Cached %d workspaces\n", len(ws))
 		s.cache.SetWorkspaces(ws)
 	}
 
 	m, err := s.compositor.ListMonitors()
 	if err == nil {
-		fmt.Printf("[Server] Cached %d monitors\n", len(m))
 		s.cache.SetMonitors(m)
 	}
 }
@@ -75,20 +74,21 @@ func (s *Server) watchEvents() {
 			}
 		case ipc.EventWindowClosed:
 			if id, ok := e.Payload["address"].(string); ok {
-				// Hyprland: uses "address" key with hex string
 				s.cache.RemoveWindow(id)
 				s.broadcastEvent("Event.WindowClosed", map[string]string{"ID": id})
 			} else if id, ok := e.Payload["id"].(string); ok {
-				// Niri/MangoWC: normalized string IDs
 				s.cache.RemoveWindow(id)
 				s.broadcastEvent("Event.WindowClosed", map[string]string{"ID": id})
 			} else if id, ok := e.Payload["id"].(int); ok {
-				// Fallback: legacy int IDs
 				strID := fmt.Sprintf("%d", id)
 				s.cache.RemoveWindow(strID)
 				s.broadcastEvent("Event.WindowClosed", map[string]string{"ID": strID})
 			}
 		case ipc.EventWindowFocused:
+			// Mark focus in cache BEFORE broadcasting
+			if addr, ok := e.Payload["address"].(string); ok {
+				s.cache.MarkWindowFocused(addr)
+			}
 			// Track window in cache if not already present (helps MangoWC accumulate windows)
 			if e.Window != nil && e.Window.ID != "" {
 				existing := s.cache.GetWindows()
@@ -103,11 +103,7 @@ func (s *Server) watchEvents() {
 					s.cache.AddWindow(*e.Window)
 				}
 			}
-			if class, ok := e.Payload["class"].(string); ok {
-				if title, ok := e.Payload["title"].(string); ok {
-					s.broadcastEvent("Event.WindowFocused", map[string]string{"Class": class, "Title": title})
-				}
-			}
+			s.broadcastEvent("Event.WindowFocused", e.Payload)
 		case ipc.EventWindowTitleChanged:
 			var id string
 			if addr, ok := e.Payload["address"].(string); ok {
@@ -172,8 +168,17 @@ func (s *Server) watchEvents() {
 			}
 			s.broadcastEvent("Event.FullscreenChanged", e.Payload)
 		case ipc.EventFocusedMonitorChanged:
+			s.initCache()
 			s.broadcastEvent("Event.FocusedMonitorChanged", e.Payload)
 		default:
+			// Check if this is a floating mode change (has address + floating in payload)
+			if addr, ok := e.Payload["address"].(string); ok {
+				if floating, ok := e.Payload["floating"].(bool); ok {
+					s.cache.UpdateWindowFloating(addr, floating)
+					s.broadcastEvent("Event.FloatingChanged", e.Payload)
+					continue
+				}
+			}
 			s.initCache()
 			s.broadcastEvent("Event.CacheRefreshed", nil)
 		}
@@ -233,7 +238,6 @@ func (s *Server) handleConnection(conn net.Conn) {
 			return
 		}
 
-		fmt.Printf("[Server] Request: %s\n", req.Method)
 		resp := Response{ID: req.ID}
 
 		var err error
@@ -530,7 +534,16 @@ func (s *Server) handleConnection(conn net.Conn) {
 				resp.Error = fmt.Sprintf("invalid params: %v", err)
 				break
 			}
-			err = s.compositor.BatchKeybinds(p.Payload)
+		err = s.compositor.BatchKeybinds(p.Payload)
+		case "Config.RawBatch":
+			var p struct {
+				Command string `json:"command"`
+			}
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
+			err = s.compositor.RawBatch(p.Command)
 		case "Config.Reload":
 			err = s.compositor.ReloadConfig()
 		case "Config.GetAnimations":
@@ -717,15 +730,14 @@ func (s *Server) handleConnection(conn net.Conn) {
 			s.clientsMu.Lock()
 			s.clients[conn] = struct{}{}
 			s.clientsMu.Unlock()
-			stateDump := map[string]interface{}{
-				"Windows":    s.cache.GetWindows(),
-				"Workspaces": s.cache.GetWorkspaces(),
-				"Monitors":   s.cache.GetMonitors(),
-			}
 			notif := Notification{
 				JSONRPC: "2.0",
 				Method:  "State.Dump",
-				Params:  stateDump,
+				State: &StateDump{
+					Windows:    s.cache.GetWindows(),
+					Workspaces: s.cache.GetWorkspaces(),
+					Monitors:   s.cache.GetMonitors(),
+				},
 			}
 			if data, err := json.Marshal(notif); err == nil {
 				data = append(data, '\n')
@@ -749,10 +761,17 @@ func (s *Server) handleConnection(conn net.Conn) {
 	}
 }
 
+type StateDump struct {
+	Windows    []ipc.Window    `json:"windows"`
+	Workspaces []ipc.Workspace `json:"workspaces"`
+	Monitors   []ipc.Monitor   `json:"monitors"`
+}
+
 type Notification struct {
 	JSONRPC string      `json:"jsonrpc"`
 	Method  string      `json:"method"`
 	Params  interface{} `json:"params,omitempty"`
+	State   *StateDump  `json:"state,omitempty"`
 }
 
 func (s *Server) broadcastEvent(method string, params interface{}) {
@@ -767,6 +786,11 @@ func (s *Server) broadcastEvent(method string, params interface{}) {
 		JSONRPC: "2.0",
 		Method:  method,
 		Params:  params,
+		State: &StateDump{
+			Windows:    s.cache.GetWindows(),
+			Workspaces: s.cache.GetWorkspaces(),
+			Monitors:   s.cache.GetMonitors(),
+		},
 	}
 
 	data, err := json.Marshal(notif)

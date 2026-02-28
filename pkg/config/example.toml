@@ -1,0 +1,106 @@
+# axctl configuration
+# Place at: ~/.config/axctl/config.toml
+#
+# All sections are optional — the daemon works fine without a config file.
+# Only sections present in the file are applied; missing sections are left
+# at their compositor defaults.
+
+# Import other TOML files (paths relative to this file, supports globs).
+# Later imports override earlier ones; this file's values override all imports.
+# include = [
+#     "keybinds.toml",
+#     "rules/*.toml",
+# ]
+
+# ─── Appearance ───────────────────────────────────────────────────────
+
+[appearance]
+
+  [appearance.gaps]
+  inner = 5
+  outer = 10
+
+  [appearance.border]
+  width = 2
+  active_color = "#ff5555"
+  inactive_color = "#333333"
+  rounding = 10
+
+  [appearance.opacity]
+  active = 1.0
+  inactive = 0.9
+
+  [appearance.blur]
+  enabled = true
+  size = 5
+  passes = 2
+
+  [appearance.shadow]
+  enabled = true
+  size = 10
+  color = "#000000aa"
+
+  [appearance.animations]
+  enabled = true
+
+# ─── Input ────────────────────────────────────────────────────────────
+
+[input]
+
+  [input.keyboard]
+  # Comma-separated XKB layout names
+  layouts = "us,es"
+  # Comma-separated XKB variant names (empty string = default variant)
+  variants = "altgr-intl,"
+
+# ─── Keybinds ─────────────────────────────────────────────────────────
+# Each [[keybinds]] entry defines one keyboard shortcut.
+# These are applied live via the compositor's batch keybind interface.
+
+[[keybinds]]
+modifiers = ["SUPER"]
+key = "Return"
+dispatcher = "exec"
+argument = "kitty"
+enabled = true
+
+[[keybinds]]
+modifiers = ["SUPER"]
+key = "C"
+dispatcher = "killactive"
+argument = ""
+enabled = true
+
+[[keybinds]]
+modifiers = ["SUPER"]
+key = "E"
+dispatcher = "exec"
+argument = "thunar"
+enabled = true
+
+[[keybinds]]
+modifiers = ["SUPER"]
+key = "V"
+dispatcher = "togglefloating"
+argument = ""
+enabled = true
+
+[[keybinds]]
+modifiers = ["SUPER"]
+key = "F"
+dispatcher = "fullscreen"
+argument = "1"
+enabled = true
+
+# ─── Window Rules ─────────────────────────────────────────────────────
+# Window rules are applied via static config generation and compositor reload.
+
+[[window_rules]]
+match = "class:firefox"
+rule = "opacity 0.95"
+action = ""
+
+[[window_rules]]
+match = "class:kitty"
+rule = "opacity 0.9"
+action = ""

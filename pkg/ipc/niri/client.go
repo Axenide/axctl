@@ -111,13 +111,17 @@ func (n *Niri) ListWindows() ([]ipc.Window, error) {
 		}
 
 		windows[i] = ipc.Window{
-			ID:          fmt.Sprintf("%d", w.ID),
-			Title:       title,
-			Class:       class,
-			WorkspaceID: wsID,
-			MonitorID:   monitorID,
-			Floating:    w.IsFloating,
-			Fullscreen:  w.IsFullscreen,
+			ID:           fmt.Sprintf("%d", w.ID),
+			Title:        title,
+			AppID:        class,
+			WorkspaceID:  wsID,
+			IsFocused:    w.IsFocused,
+			IsFloating:   w.IsFloating,
+			IsFullscreen: w.IsFullscreen,
+			IsHidden:     false,
+			Metadata: map[string]interface{}{
+				"monitor_id": monitorID,
+			},
 		}
 	}
 	return windows, nil
@@ -250,7 +254,7 @@ func (n *Niri) SetFullscreen(id string, state bool) error {
 	isFs := false
 	for _, w := range windows {
 		if w.ID == targetID {
-			isFs = w.Fullscreen
+			isFs = w.IsFullscreen
 			break
 		}
 	}
@@ -341,13 +345,16 @@ func (n *Niri) ListWorkspaces() ([]ipc.Workspace, error) {
 			activeWindowID = fmt.Sprintf("%d", *w.ActiveWindowID)
 		}
 		res[i] = ipc.Workspace{
-			ID:             fmt.Sprintf("%d", w.ID),
-			Name:           name,
-			MonitorID:      output,
-			Active:         w.IsActive,
-			Index:          w.Idx,
-			Focused:        w.IsFocused,
-			ActiveWindowID: activeWindowID,
+			ID:        fmt.Sprintf("%d", w.ID),
+			Name:      name,
+			MonitorID: output,
+			IsActive:  w.IsActive,
+			IsEmpty:   false,
+			Metadata: map[string]interface{}{
+				"focused":          w.IsFocused,
+				"index":            w.Idx,
+				"active_window_id": activeWindowID,
+			},
 		}
 	}
 	return res, nil
@@ -359,7 +366,7 @@ func (n *Niri) ActiveWorkspace() (*ipc.Workspace, error) {
 		return nil, err
 	}
 	for _, ws := range workspaces {
-		if ws.Focused {
+		if ws.Metadata["focused"].(bool) {
 			return &ws, nil
 		}
 	}
@@ -436,20 +443,23 @@ func (n *Niri) ListMonitors() ([]ipc.Monitor, error) {
 	res := make([]ipc.Monitor, len(niriOutputs))
 	for i, o := range niriOutputs {
 		m := ipc.Monitor{
-			ID:   o.Name,
-			Name: o.Name,
+			ID:          o.Name,
+			Name:        o.Name,
+			Description: fmt.Sprintf("%s %s", o.Make, o.Model),
+			IsFocused:   false, // Niri doesn't provide this directly here
+			Metadata:    make(map[string]interface{}),
 		}
 		if o.Logical != nil {
 			m.Width = o.Logical.Width
 			m.Height = o.Logical.Height
-			m.X = o.Logical.X
-			m.Y = o.Logical.Y
+			m.Metadata["x"] = o.Logical.X
+			m.Metadata["y"] = o.Logical.Y
 			m.Scale = o.Logical.Scale
-			m.Transform = niriTransformToInt(o.Logical.Transform)
+			m.Metadata["transform"] = niriTransformToInt(o.Logical.Transform)
 		}
 		if o.CurrentMode != nil && *o.CurrentMode < len(o.Modes) {
 			mode := o.Modes[*o.CurrentMode]
-			m.Refresh = mode.RefreshRate
+			m.RefreshRate = mode.RefreshRate
 			if m.Width == 0 {
 				m.Width = mode.Width
 			}
@@ -546,6 +556,10 @@ func (n *Niri) BatchConfig(configs map[string]interface{}) error {
 }
 
 func (n *Niri) BatchKeybinds(jsonPayload string) error {
+	return ipc.ErrNotSupported
+}
+
+func (n *Niri) RawBatch(command string) error {
 	return ipc.ErrNotSupported
 }
 
@@ -680,7 +694,7 @@ func (n *Niri) Subscribe() (<-chan ipc.Event, error) {
 					event.Window = &ipc.Window{
 						ID:    fmt.Sprintf("%d", d.Window.ID),
 						Title: title,
-						Class: class,
+						AppID: class,
 					}
 				case "WindowClosed":
 					event.Type = ipc.EventWindowClosed
@@ -721,7 +735,7 @@ func (n *Niri) Subscribe() (<-chan ipc.Event, error) {
 					event.Window = &ipc.Window{
 						ID:    fmt.Sprintf("%d", d.Window.ID),
 						Title: title,
-						Class: class,
+						AppID: class,
 					}
 					event.Payload["id"] = fmt.Sprintf("%d", d.Window.ID)
 					event.Payload["title"] = title
@@ -767,4 +781,15 @@ func (n *Niri) SwitchKeyboardLayout(action string) error {
 
 func (n *Niri) SetKeyboardLayouts(layouts string, variants string) error {
 	return ipc.ErrNotSupported
+}
+
+func (n *Niri) GetCapabilities() (ipc.Capabilities, error) {
+	return ipc.Capabilities{
+		Blur:                true,
+		Shadows:             true,
+		Animations:          true,
+		RoundedCorners:      true,
+		WorkspacesSupported: true,
+		WindowsSupported:    true,
+	}, nil
 }

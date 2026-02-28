@@ -55,7 +55,10 @@ func (c *StateCache) UpdateWindowWorkspace(id, workspaceID, monitorID string) {
 		if w.ID == id {
 			c.windows[i].WorkspaceID = workspaceID
 			if monitorID != "" {
-				c.windows[i].MonitorID = monitorID
+				if c.windows[i].Metadata == nil {
+					c.windows[i].Metadata = make(map[string]interface{})
+				}
+				c.windows[i].Metadata["monitor_id"] = monitorID
 			}
 			break
 		}
@@ -67,7 +70,7 @@ func (c *StateCache) UpdateWindowState(id string, isFullscreen bool) {
 	defer c.mu.Unlock()
 	for i, w := range c.windows {
 		if w.ID == id {
-			c.windows[i].Fullscreen = isFullscreen
+			c.windows[i].IsFullscreen = isFullscreen
 			break
 		}
 	}
@@ -107,4 +110,23 @@ func (c *StateCache) GetMonitors() []Monitor {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.monitors
+}
+
+func (c *StateCache) MarkWindowFocused(id string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for i := range c.windows {
+		c.windows[i].IsFocused = (c.windows[i].ID == id)
+	}
+}
+
+func (c *StateCache) UpdateWindowFloating(id string, floating bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for i, w := range c.windows {
+		if w.ID == id {
+			c.windows[i].IsFloating = floating
+			break
+		}
+	}
 }

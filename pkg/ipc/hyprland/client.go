@@ -86,18 +86,22 @@ func (h *Hyprland) ListWindows() ([]ipc.Window, error) {
 	windows := make([]ipc.Window, len(clients))
 	for i, c := range clients {
 		windows[i] = ipc.Window{
-			ID:          c.Address,
-			Title:       c.Title,
-			Class:       c.Class,
-			WorkspaceID: fmt.Sprintf("%d", c.Workspace.ID),
-			MonitorID:   fmt.Sprintf("%d", c.Monitor),
-			Floating:    c.Floating,
-			Fullscreen:  c.Fullscreen != 0,
-			Pinned:      c.Pinned,
-			X:           c.At[0],
-			Y:           c.At[1],
-			Width:       c.Size[0],
-			Height:      c.Size[1],
+			ID:           c.Address,
+			Title:        c.Title,
+			AppID:        c.Class,
+			WorkspaceID:  fmt.Sprintf("%d", c.Workspace.ID),
+			IsFocused:    false, // Will be updated if active
+			IsFloating:   c.Floating,
+			IsFullscreen: c.Fullscreen != 0,
+			IsHidden:     false,
+			Metadata: map[string]interface{}{
+				"monitor_id": fmt.Sprintf("%d", c.Monitor),
+				"pinned":     c.Pinned,
+				"x":          c.At[0],
+				"y":          c.At[1],
+				"width":      c.Size[0],
+				"height":     c.Size[1],
+			},
 		}
 	}
 	return windows, nil
@@ -177,7 +181,7 @@ func (h *Hyprland) SetFullscreen(id string, state bool) error {
 	isFs := false
 	for _, w := range windows {
 		if w.ID == targetID {
-			isFs = w.Fullscreen
+			isFs = w.IsFullscreen
 			break
 		}
 	}
@@ -255,8 +259,11 @@ func (h *Hyprland) ListWorkspaces() ([]ipc.Workspace, error) {
 			ID:        fmt.Sprintf("%d", w.ID),
 			Name:      w.Name,
 			MonitorID: w.Monitor,
-			Active:    w.ID == activeWS.ID,
-			Focused:   w.ID == activeWS.ID,
+			IsActive:  w.ID == activeWS.ID,
+			IsEmpty:   false, // Not directly available from basic j/workspaces without parsing windows
+			Metadata: map[string]interface{}{
+				"focused": w.ID == activeWS.ID,
+			},
 		}
 	}
 	return res, nil
@@ -279,8 +286,11 @@ func (h *Hyprland) ActiveWorkspace() (*ipc.Workspace, error) {
 		ID:        fmt.Sprintf("%d", ws.ID),
 		Name:      ws.Name,
 		MonitorID: ws.Monitor,
-		Active:    true,
-		Focused:   true,
+		IsActive:  true,
+		IsEmpty:   false,
+		Metadata: map[string]interface{}{
+			"focused": true,
+		},
 	}, nil
 }
 
@@ -327,17 +337,20 @@ func (h *Hyprland) ListMonitors() ([]ipc.Monitor, error) {
 	res := make([]ipc.Monitor, len(monitors))
 	for i, m := range monitors {
 		res[i] = ipc.Monitor{
-			ID:        fmt.Sprintf("%d", m.ID),
-			Name:      m.Name,
-			Width:     m.Width,
-			Height:    m.Height,
-			Refresh:   m.RefreshRate,
-			Active:    m.Focused,
-			Workspace: m.ActiveWorkspace.Name,
-			Scale:     m.Scale,
-			X:         m.X,
-			Y:         m.Y,
-			Transform: m.Transform,
+			ID:          fmt.Sprintf("%d", m.ID),
+			Name:        m.Name,
+			Description: "",
+			Width:       m.Width,
+			Height:      m.Height,
+			RefreshRate: m.RefreshRate,
+			Scale:       m.Scale,
+			IsFocused:   m.Focused,
+			Metadata: map[string]interface{}{
+				"active_workspace": m.ActiveWorkspace.Name,
+				"x":                m.X,
+				"y":                m.Y,
+				"transform":        m.Transform,
+			},
 		}
 	}
 	return res, nil
@@ -438,11 +451,44 @@ func (h *Hyprland) BatchConfig(configs map[string]interface{}) error {
 }
 
 func (h *Hyprland) BatchKeybinds(jsonPayload string) error {
-	// Not implemented fully yet for JSON diffing, returning nil for now
-	// Ideally this parses the JSON array and generates 'keyword bind' and 'keyword unbind'
-	// Since ambxst's config loader parses to objects, we would need to replicate the previous
-	// HyprlandKeybinds.qml logic here inside Go.
-	return nil
+	var payload ipc.BatchKeybindsPayload
+	if err := json.Unmarshal([]byte(jsonPayload), &payload); err != nil {
+		return fmt.Errorf("invalid keybinds payload: %w", err)
+	}
+
+	var cmds []string
+
+	// Process unbinds first
+	for _, u := range payload.Unbinds {
+		mods := strings.Join(u.Modifiers, " ")
+		cmds = append(cmds, fmt.Sprintf("keyword unbind %s,%s", mods, u.Key))
+	}
+
+	// Process binds
+	for _, b := range payload.Binds {
+		mods := strings.Join(b.Modifiers, " ")
+		bindKeyword := "bind"
+		if b.Flags != "" {
+			bindKeyword = "bind" + b.Flags
+		}
+		if b.Flags == "m" && b.Argument == "" {
+			cmds = append(cmds, fmt.Sprintf("keyword %s %s,%s,%s", bindKeyword, mods, b.Key, b.Dispatcher))
+		} else {
+			cmds = append(cmds, fmt.Sprintf("keyword %s %s,%s,%s,%s", bindKeyword, mods, b.Key, b.Dispatcher, b.Argument))
+		}
+	}
+
+	if len(cmds) == 0 {
+		return nil
+	}
+
+	_, err := h.dispatch("[[BATCH]]" + strings.Join(cmds, ";"))
+	return err
+}
+
+func (h *Hyprland) RawBatch(command string) error {
+	_, err := h.dispatch("[[BATCH]]" + command)
+	return err
 }
 
 func (h *Hyprland) GetAnimations() (interface{}, error) {
@@ -551,7 +597,7 @@ func (h *Hyprland) Subscribe() (<-chan ipc.Event, error) {
 					event.Window = &ipc.Window{
 						ID:          "0x" + data[0],
 						WorkspaceID: data[1],
-						Class:       data[2],
+						AppID:       data[2],
 						Title:       data[3],
 					}
 				}
@@ -565,6 +611,12 @@ func (h *Hyprland) Subscribe() (<-chan ipc.Event, error) {
 					event.Payload["class"] = data[0]
 					event.Payload["title"] = data[1]
 				}
+			case "activewindowv2":
+				event.Type = ipc.EventWindowFocused
+				addr := strings.TrimSpace(parts[1])
+				if addr != "" {
+					event.Payload["address"] = "0x" + addr
+				}
 			case "workspace":
 				event.Type = ipc.EventWorkspaceChanged
 				event.Payload["name"] = parts[1]
@@ -575,7 +627,7 @@ func (h *Hyprland) Subscribe() (<-chan ipc.Event, error) {
 					event.Payload["address"] = "0x" + data[0]
 					event.Payload["workspace"] = data[1]
 				}
-			case "floating":
+			case "changefloatingmode", "floating":
 				data := strings.SplitN(parts[1], ",", 2)
 				if len(data) >= 2 {
 					event.Payload["address"] = "0x" + data[0]
@@ -633,4 +685,15 @@ func (h *Hyprland) SetKeyboardLayouts(layouts string, variants string) error {
 		h.dispatch("keyword input:kb_variant ") // clear
 	}
 	return nil
+}
+
+func (h *Hyprland) GetCapabilities() (ipc.Capabilities, error) {
+	return ipc.Capabilities{
+		Blur:                true,
+		Shadows:             true,
+		Animations:          true,
+		RoundedCorners:      true,
+		WorkspacesSupported: true,
+		WindowsSupported:    true,
+	}, nil
 }

@@ -187,7 +187,7 @@ func (c *Compositor) ActiveWorkspace() (*ipc.Workspace, error) {
 	defer c.mu.RUnlock()
 
 	for _, ws := range c.workspaces {
-		if ws.Active {
+		if ws.IsActive {
 			return &ws, nil
 		}
 	}
@@ -262,6 +262,14 @@ func (c *Compositor) SetConfig(key string, value interface{}) error {
 }
 
 func (c *Compositor) BatchConfig(configs map[string]interface{}) error {
+	return nil
+}
+
+func (c *Compositor) BatchKeybinds(jsonPayload string) error {
+	return nil
+}
+
+func (c *Compositor) RawBatch(command string) error {
 	return nil
 }
 
@@ -560,4 +568,15 @@ func (m *Compositor) SetKeyboardLayouts(layouts string, variants string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return nil
+}
+
+func (m *Compositor) GetCapabilities() (ipc.Capabilities, error) {
+	return ipc.Capabilities{
+		Blur:                true,
+		Shadows:             true,
+		Animations:          true,
+		RoundedCorners:      true,
+		WorkspacesSupported: true,
+		WindowsSupported:    true,
+	}, nil
 }

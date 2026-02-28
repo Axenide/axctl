@@ -372,21 +372,24 @@ func (m *Mangowc) setupOutputHandlers(oid uint32, ipcOut *dwlipc.IpcOutputV2) {
 		}
 		if c.title != oldTitle {
 			m.emit(ch, ipc.Event{Type: ipc.EventWindowTitleChanged, Timestamp: now,
-				Window:  &ipc.Window{ID: winID, Title: c.title, Class: c.appid},
+				Window:  &ipc.Window{ID: winID, Title: c.title, AppID: c.appid},
 				Payload: map[string]interface{}{"title": c.title, "monitor": monName, "id": winID}})
 		}
 		if c.appid != oldAppid {
 			newWin := ipc.Window{
-				ID:         winID,
-				Title:      c.title,
-				Class:      c.appid,
-				MonitorID:  monName,
-				Floating:   c.floating,
-				Fullscreen: c.fullscreen,
-				X:          int(c.x),
-				Y:          int(c.y),
-				Width:      int(c.width),
-				Height:     int(c.height),
+				ID:           winID,
+				Title:        c.title,
+				AppID:        c.appid,
+				WorkspaceID:  "", // to be populated if needed
+				IsFloating:   c.floating,
+				IsFullscreen: c.fullscreen,
+				Metadata: map[string]interface{}{
+					"monitor_id": monName,
+					"x":          int(c.x),
+					"y":          int(c.y),
+					"width":      int(c.width),
+					"height":     int(c.height),
+				},
 			}
 			// Track this window; emit WindowCreated if never seen before
 			m.mu.Lock()
@@ -487,12 +490,15 @@ func (m *Mangowc) setupToplevelHandlers() {
 			now := time.Now().Unix()
 
 			w := ipc.Window{
-				ID:         winID,
-				Title:      info.title,
-				Class:      info.appId,
-				MonitorID:  info.outputName,
-				Fullscreen: info.fullscreen,
-				Maximized:  info.maximized,
+				ID:           winID,
+				Title:        info.title,
+				AppID:        info.appId,
+				WorkspaceID:  "",
+				IsFullscreen: info.fullscreen,
+				Metadata: map[string]interface{}{
+					"monitor_id": info.outputName,
+					"maximized":  info.maximized,
+				},
 			}
 
 			if isNew {
@@ -523,10 +529,12 @@ func (m *Mangowc) setupToplevelHandlers() {
 			}
 			winID := fmt.Sprintf("%d", hid)
 			w := ipc.Window{
-				ID:        winID,
-				Title:     info.title,
-				Class:     info.appId,
-				MonitorID: info.outputName,
+				ID:           winID,
+				Title:        info.title,
+				AppID:        info.appId,
+				Metadata: map[string]interface{}{
+					"monitor_id": info.outputName,
+				},
 			}
 			m.emit(ch, ipc.Event{Type: ipc.EventWindowClosed, Timestamp: time.Now().Unix(),
 				Window:  &w,
@@ -603,14 +611,16 @@ func (m *Mangowc) ListWindows() ([]ipc.Window, error) {
 			}
 			wsID := info.cachedWsID
 			windows = append(windows, ipc.Window{
-				ID:          fmt.Sprintf("%d", hid),
-				Title:       info.title,
-				Class:       info.appId,
-				MonitorID:   info.outputName,
-				WorkspaceID: wsID,
-				Fullscreen:  info.fullscreen,
-				Maximized:   info.maximized,
-
+				ID:           fmt.Sprintf("%d", hid),
+				Title:        info.title,
+				AppID:        info.appId,
+				WorkspaceID:  wsID,
+				IsFocused:    info.activated,
+				IsFullscreen: info.fullscreen,
+				Metadata: map[string]interface{}{
+					"monitor_id": info.outputName,
+					"maximized":  info.maximized,
+				},
 			})
 		}
 		return windows, nil
@@ -631,17 +641,20 @@ func (m *Mangowc) ListWindows() ([]ipc.Window, error) {
 			}
 		}
 		w := ipc.Window{
-			ID:          winID,
-			Title:       out.title,
-			Class:       out.appid,
-			MonitorID:   out.name,
-			WorkspaceID: wsID,
-			Floating:    out.floating,
-			Fullscreen:  out.fullscreen,
-			X:           int(out.x),
-			Y:           int(out.y),
-			Width:       int(out.width),
-			Height:      int(out.height),
+			ID:           winID,
+			Title:        out.title,
+			AppID:        out.appid,
+			WorkspaceID:  wsID,
+			IsFocused:    out.active,
+			IsFloating:   out.floating,
+			IsFullscreen: out.fullscreen,
+			Metadata: map[string]interface{}{
+				"monitor_id": out.name,
+				"x":          int(out.x),
+				"y":          int(out.y),
+				"width":      int(out.width),
+				"height":     int(out.height),
+			},
 		}
 		windows = append(windows, w)
 		
@@ -835,12 +848,14 @@ func (m *Mangowc) ListWorkspaces() ([]ipc.Workspace, error) {
 				ID:        wsID,
 				Name:      strconv.Itoa(tagNum),
 				MonitorID: out.name,
-				Active:    active,
-				HasWindows: t.clients > 0,
-				Layout:    layoutName,
-				Index:     i,
-				Urgent:    urgent,
-				Focused:   active && out.active,
+				IsActive:  active,
+				IsEmpty:   t.clients == 0,
+				Metadata: map[string]interface{}{
+					"layout":  layoutName,
+					"index":   i,
+					"urgent":  urgent,
+					"focused": active && out.active,
+				},
 			})
 		}
 	}
@@ -868,10 +883,13 @@ func (m *Mangowc) ActiveWorkspace() (*ipc.Workspace, error) {
 				ID:        wsID,
 				Name:      strconv.Itoa(tagNum),
 				MonitorID: out.name,
-				Active:    true,
-				Layout:    layoutName,
-				Index:     i,
-				Focused:   true,
+				IsActive:  true,
+				IsEmpty:   false,
+				Metadata: map[string]interface{}{
+					"layout":  layoutName,
+					"index":   i,
+					"focused": true,
+				},
 			}, nil
 		}
 	}
@@ -944,11 +962,14 @@ func (m *Mangowc) ListMonitors() ([]ipc.Monitor, error) {
 			}
 		}
 		monitors = append(monitors, ipc.Monitor{
-			ID:        s.name,
-			Name:      s.name,
-			Active:    s.active,
-			Workspace: wsName,
-			Scale:     s.scale,
+			ID:          s.name,
+			Name:        s.name,
+			Description: "",
+			IsFocused:   s.active,
+			Scale:       s.scale,
+			Metadata: map[string]interface{}{
+				"active_workspace": wsName,
+			},
 		})
 	}
 	return monitors, nil
@@ -1067,6 +1088,10 @@ func (m *Mangowc) BatchKeybinds(jsonPayload string) error {
 	return ipc.ErrNotSupported
 }
 
+func (m *Mangowc) RawBatch(command string) error {
+	return ipc.ErrNotSupported
+}
+
 func (m *Mangowc) ReloadConfig() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -1177,4 +1202,15 @@ func (m *Mangowc) SetKeyboardLayouts(layouts string, variants string) error {
 		ipcOut.DispatchCmd("setoption", "xkb_rules_variant", " ", "", "", "")
 	}
 	return ipcOut.DispatchCmd("setoption", "xkb_rules_layout", layouts, "", "", "")
+}
+
+func (m *Mangowc) GetCapabilities() (ipc.Capabilities, error) {
+	return ipc.Capabilities{
+		Blur:                true,
+		Shadows:             true,
+		Animations:          true,
+		RoundedCorners:      true,
+		WorkspacesSupported: true,
+		WindowsSupported:    true,
+	}, nil
 }

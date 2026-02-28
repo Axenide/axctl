@@ -10,6 +10,7 @@ import (
 	"strings"
 	"syscall"
 
+	"axctl/pkg/config"
 	"axctl/pkg/ipc"
 	"axctl/pkg/ipc/hyprland"
 	"axctl/pkg/ipc/mangowc"
@@ -82,10 +83,12 @@ func usage() {
 	fmt.Println("                                  opacity.active, opacity.inactive,")
 	fmt.Println("                                  blur.enabled, blur.size, blur.passes")
 	fmt.Println("    batch <json_string>     Batch apply configs")
-	fmt.Println("    apply <json_string>     Apply declarative universal config payload" )
+	fmt.Println("    apply <json_string>     Apply declarative universal config payload")
+	fmt.Println("    raw-batch <command>     Send raw compositor batch command")
 	fmt.Println("    get-animations          Get animation configs")
 	fmt.Println("    bind-key <mods> <key> <cmd> Bind a key")
 	fmt.Println("    unbind-key <mods> <key> Unbind a key")
+	fmt.Println("    keybinds-batch <json>   Batch bind/unbind keys (structured JSON)")
 	fmt.Println("    reload                  Reload config")
 	fmt.Println("\n  system <action> [args]")
 	fmt.Println("    execute <cmd>           Execute command")
@@ -274,6 +277,37 @@ func runDaemon() {
 
 	fmt.Printf("Starting axctl daemon on %s\n", socketPath)
 
+	// Load TOML config if it exists
+	var cfgWatcher *config.ConfigWatcher
+	configPath := config.DefaultConfigPath()
+	if _, statErr := os.Stat(configPath); statErr == nil {
+		cfg, cfgErr := config.LoadConfig(configPath)
+		if cfgErr != nil {
+			fmt.Printf("[axctl-config] Error loading config: %v\n", cfgErr)
+		} else {
+			fmt.Printf("[axctl-config] Loaded config from %s\n", configPath)
+			if applyErr := config.ApplyConfig(cfg, comp); applyErr != nil {
+				fmt.Printf("[axctl-config] Error applying config: %v\n", applyErr)
+			}
+		}
+
+		// Watch for config changes
+		watcher, watchErr := config.NewConfigWatcher()
+		if watchErr != nil {
+			fmt.Printf("[axctl-config] Warning: could not start watcher: %v\n", watchErr)
+		} else {
+			watcher.Start(configPath, func(newCfg *config.TOMLConfig) {
+				fmt.Println("[axctl-config] Config changed, reloading...")
+				if applyErr := config.ApplyConfig(newCfg, comp); applyErr != nil {
+					fmt.Printf("[axctl-config] Error applying config: %v\n", applyErr)
+				}
+			})
+			cfgWatcher = watcher
+		}
+	} else {
+		fmt.Printf("[axctl-config] No config file at %s, skipping\n", configPath)
+	}
+
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 
@@ -285,6 +319,9 @@ func runDaemon() {
 	}()
 
 	<-sig
+	if cfgWatcher != nil {
+		cfgWatcher.Stop()
+	}
 	os.Remove(socketPath)
 }
 
@@ -462,9 +499,13 @@ func handleRPC(category string, args []string) {
 			params["key"] = args[1]
 			params["value"] = args[2]
 		}
-case "Config.Apply":
+	case "Config.Apply":
 		if len(args) > 1 {
 			params["payload"] = args[1]
+		}
+	case "Config.RawBatch":
+		if len(args) > 1 {
+			params["command"] = args[1]
 		}
 	case "Config.Batch":
 		if len(args) > 1 {
@@ -486,6 +527,10 @@ case "Config.Apply":
 		if len(args) > 2 {
 			params["mods"] = args[1]
 			params["key"] = args[2]
+		}
+	case "Config.KeybindsBatch":
+		if len(args) > 1 {
+			params["payload"] = args[1]
 		}
 	case "System.Execute":
 		if len(args) > 1 {
