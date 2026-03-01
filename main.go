@@ -273,6 +273,15 @@ func runDaemon() {
 	fmt.Printf("Detected compositor: %T\n", comp)
 
 	socketPath := fmt.Sprintf("/tmp/axctl-%d.sock", os.Getuid())
+
+	// Single instance check
+	if conn, err := net.Dial("unix", socketPath); err == nil {
+		conn.Close()
+		fmt.Println("Error: axctl daemon is already running.")
+		os.Exit(1)
+	}
+	os.Remove(socketPath) // Clean up stale socket if daemon is not running
+
 	srv := server.New(comp, socketPath)
 
 	fmt.Printf("Starting axctl daemon on %s\n", socketPath)
