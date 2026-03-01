@@ -129,7 +129,7 @@ func (im *IdleManager) waitIdleInternal(timeoutMs uint32, inputOnly bool) error 
 		return fmt.Errorf("idle_notify not supported by compositor")
 	}
 
-	ch := make(chan struct{})
+	ch := make(chan struct{}, 1)
 
 	im.wlMu.Lock()
 	var notif *ext_idle_notify_v1.ExtIdleNotificationV1
@@ -173,7 +173,7 @@ func (im *IdleManager) waitResumeInternal(timeoutMs uint32, inputOnly bool) erro
 		return fmt.Errorf("idle_notify not supported by compositor")
 	}
 
-	ch := make(chan struct{})
+	ch := make(chan struct{}, 1)
 
 	im.wlMu.Lock()
 	var notif *ext_idle_notify_v1.ExtIdleNotificationV1
