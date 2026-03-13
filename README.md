@@ -32,6 +32,9 @@ Hyprland, Niri, and MangoWC via a JSON-RPC API over a Unix socket.
 curl -L get.axeni.de/axctl | sh
 ```
 
+On NixOS, the installer uses `nix profile add github:Axenide/axctl` instead of
+writing to `/usr/local/bin`.
+
 ### Build from source
 
 Requires Go 1.25+.
