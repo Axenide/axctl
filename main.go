@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"syscall"
 
@@ -18,7 +19,17 @@ import (
 	"axctl/pkg/server"
 )
 
+var Version = "dev"
+
 func main() {
+	if len(os.Args) >= 2 {
+		switch os.Args[1] {
+		case "--version", "-v", "version":
+			printVersion()
+			return
+		}
+	}
+
 	if len(os.Args) < 2 {
 		usage()
 		return
@@ -38,6 +49,19 @@ func main() {
 	default:
 		usage()
 	}
+}
+
+func printVersion() {
+	version := Version
+	if version == "dev" {
+		if bi, ok := debug.ReadBuildInfo(); ok {
+			if bi.Main.Version != "" && bi.Main.Version != "(devel)" {
+				version = bi.Main.Version
+			}
+		}
+	}
+
+	fmt.Printf("axctl %s\n", version)
 }
 
 func usage() {
