@@ -32,6 +32,9 @@ func New(c ipc.Compositor, path string) *Server {
 		clients:    make(map[net.Conn]struct{}),
 		idleMgr:    idleMgr,
 	}
+	if idleMgr != nil {
+		idleMgr.SetIdleMonitorCallback(s.handleIdleMonitorChanged)
+	}
 	s.initCache()
 	go s.watchEvents()
 	return s
@@ -534,7 +537,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 				resp.Error = fmt.Sprintf("invalid params: %v", err)
 				break
 			}
-		err = s.compositor.BatchKeybinds(p.Payload)
+			err = s.compositor.BatchKeybinds(p.Payload)
 		case "Config.RawBatch":
 			var p struct {
 				Command string `json:"command"`
@@ -702,6 +705,197 @@ func (s *Server) handleConnection(conn net.Conn) {
 					result = "false"
 				}
 			}
+		case "System.IdleMonitorCreate":
+			if s.idleMgr == nil {
+				resp.Error = "Idle management not supported on this session"
+				break
+			}
+			var p struct {
+				TimeoutMs         *uint32 `json:"timeout_ms"`
+				RespectInhibitors *bool   `json:"respect_inhibitors"`
+				Enabled           *bool   `json:"enabled"`
+			}
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
+			timeoutMs := uint32(0)
+			respectInhibitors := true
+			enabled := true
+			if p.TimeoutMs != nil {
+				timeoutMs = *p.TimeoutMs
+			}
+			if p.RespectInhibitors != nil {
+				respectInhibitors = *p.RespectInhibitors
+			}
+			if p.Enabled != nil {
+				enabled = *p.Enabled
+			}
+			state, e := s.idleMgr.CreateIdleMonitor(timeoutMs, respectInhibitors, enabled)
+			err = e
+			if err == nil {
+				result = state
+			}
+		case "System.IdleMonitorUpdate":
+			if s.idleMgr == nil {
+				resp.Error = "Idle management not supported on this session"
+				break
+			}
+			var p struct {
+				ID                uint32  `json:"id"`
+				TimeoutMs         *uint32 `json:"timeout_ms"`
+				RespectInhibitors *bool   `json:"respect_inhibitors"`
+				Enabled           *bool   `json:"enabled"`
+			}
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
+			current, e := s.idleMgr.GetIdleMonitor(p.ID)
+			if e != nil {
+				err = e
+				break
+			}
+			timeoutMs := current.TimeoutMs
+			respectInhibitors := current.RespectInhibitors
+			enabled := current.Enabled
+			if p.TimeoutMs != nil {
+				timeoutMs = *p.TimeoutMs
+			}
+			if p.RespectInhibitors != nil {
+				respectInhibitors = *p.RespectInhibitors
+			}
+			if p.Enabled != nil {
+				enabled = *p.Enabled
+			}
+			state, e := s.idleMgr.UpdateIdleMonitor(p.ID, timeoutMs, respectInhibitors, enabled)
+			err = e
+			if err == nil {
+				result = state
+			}
+		case "System.IdleMonitorGet":
+			if s.idleMgr == nil {
+				resp.Error = "Idle management not supported on this session"
+				break
+			}
+			var p struct {
+				ID uint32 `json:"id"`
+			}
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
+			state, e := s.idleMgr.GetIdleMonitor(p.ID)
+			err = e
+			if err == nil {
+				result = state
+			}
+		case "System.IdleMonitorDestroy":
+			if s.idleMgr == nil {
+				resp.Error = "Idle management not supported on this session"
+				break
+			}
+			var p struct {
+				ID uint32 `json:"id"`
+			}
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
+			err = s.idleMgr.DestroyIdleMonitor(p.ID)
+		case "System.IdleInhibitorCreate":
+			if s.idleMgr == nil {
+				resp.Error = "Idle management not supported on this session"
+				break
+			}
+			var p struct {
+				Enabled *bool `json:"enabled"`
+			}
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
+			enabled := false
+			if p.Enabled != nil {
+				enabled = *p.Enabled
+			}
+			state, e := s.idleMgr.CreateIdleInhibitor(enabled)
+			err = e
+			if err == nil {
+				result = state
+			}
+		case "System.IdleInhibitorSet":
+			if s.idleMgr == nil {
+				resp.Error = "Idle management not supported on this session"
+				break
+			}
+			var p struct {
+				ID      uint32 `json:"id"`
+				Enabled bool   `json:"enabled"`
+			}
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
+			state, e := s.idleMgr.SetIdleInhibitorEnabled(p.ID, p.Enabled)
+			err = e
+			if err == nil {
+				result = state
+			}
+		case "System.IdleInhibitorGet":
+			if s.idleMgr == nil {
+				resp.Error = "Idle management not supported on this session"
+				break
+			}
+			var p struct {
+				ID uint32 `json:"id"`
+			}
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
+			state, e := s.idleMgr.GetIdleInhibitor(p.ID)
+			err = e
+			if err == nil {
+				result = state
+			}
+		case "System.IdleInhibitorDestroy":
+			if s.idleMgr == nil {
+				resp.Error = "Idle management not supported on this session"
+				break
+			}
+			var p struct {
+				ID uint32 `json:"id"`
+			}
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
+			err = s.idleMgr.DestroyIdleInhibitor(p.ID)
+		case "System.InhibitSystem":
+			if s.idleMgr == nil {
+				resp.Error = "Idle management not supported on this session"
+				break
+			}
+			var p struct {
+				On bool `json:"on"`
+			}
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
+			err = s.idleMgr.InhibitSystem(p.On)
+		case "System.IsSystemInhibited":
+			if s.idleMgr == nil {
+				resp.Error = "Idle management not supported on this session"
+				break
+			}
+			if s.idleMgr.IsSystemInhibited() {
+				result = "true"
+			} else {
+				result = "false"
+			}
+
 		case "System.Exit":
 			err = s.compositor.Exit()
 		case "System.SwitchKeyboardLayout":
@@ -804,4 +998,12 @@ func (s *Server) broadcastEvent(method string, params interface{}) {
 			c.Write(data)
 		}(conn)
 	}
+}
+
+func (s *Server) handleIdleMonitorChanged(id uint32, isIdle bool) {
+	params := map[string]interface{}{
+		"id":      id,
+		"is_idle": isIdle,
+	}
+	s.broadcastEvent("Event.IdleMonitorChanged", params)
 }

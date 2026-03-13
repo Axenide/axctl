@@ -127,6 +127,16 @@ func usage() {
 	fmt.Println("    input-resume-wait <ms>  Block until physical input resumes")
 	fmt.Println("    is-input-idle <ms>      Check if physical input is idle (returns true/false)")
 	fmt.Println("    is-inhibited            Check if axctl has idle inhibited (returns true/false)")
+	fmt.Println("    idle-monitor-create [timeout_ms] [respect_inhibitors 0|1] [enabled 0|1] Create an idle monitor")
+	fmt.Println("    idle-monitor-update <id> [timeout_ms] [respect_inhibitors 0|1] [enabled 0|1] Update an idle monitor")
+	fmt.Println("    idle-monitor-get <id>   Get idle monitor state")
+	fmt.Println("    idle-monitor-destroy <id> Destroy an idle monitor")
+	fmt.Println("    idle-inhibitor-create [enabled 0|1] Create an idle inhibitor")
+	fmt.Println("    idle-inhibitor-set <id> <0|1> Enable/disable an idle inhibitor")
+	fmt.Println("    idle-inhibitor-get <id> Get idle inhibitor state")
+	fmt.Println("    idle-inhibitor-destroy <id> Destroy an idle inhibitor")
+	fmt.Println("    inhibit-system <0|1>    Enable or disable system-wide idle inhibition (systemd)")
+	fmt.Println("    is-system-inhibited   Check if system-wide idle inhibition is active")
 	fmt.Println("    get-capabilities        Get compositor capabilities")
 	fmt.Println("    exit                    Exit compositor")
 }
@@ -593,6 +603,64 @@ func handleRPC(category string, args []string) {
 			params["timeout_ms"] = ms
 		}
 	case "System.IsInhibited":
+		// No args needed
+	case "System.IdleMonitorCreate":
+		if len(args) > 1 {
+			var ms int
+			fmt.Sscanf(args[1], "%d", &ms)
+			params["timeout_ms"] = ms
+		}
+		if len(args) > 2 {
+			params["respect_inhibitors"] = args[2] == "1"
+		}
+		if len(args) > 3 {
+			params["enabled"] = args[3] == "1"
+		}
+	case "System.IdleMonitorUpdate":
+		if len(args) > 1 {
+			var id int
+			fmt.Sscanf(args[1], "%d", &id)
+			params["id"] = id
+		}
+		if len(args) > 2 {
+			var ms int
+			fmt.Sscanf(args[2], "%d", &ms)
+			params["timeout_ms"] = ms
+		}
+		if len(args) > 3 {
+			params["respect_inhibitors"] = args[3] == "1"
+		}
+		if len(args) > 4 {
+			params["enabled"] = args[4] == "1"
+		}
+	case "System.IdleMonitorGet", "System.IdleMonitorDestroy":
+		if len(args) > 1 {
+			var id int
+			fmt.Sscanf(args[1], "%d", &id)
+			params["id"] = id
+		}
+	case "System.IdleInhibitorCreate":
+		if len(args) > 1 {
+			params["enabled"] = args[1] == "1"
+		}
+	case "System.IdleInhibitorSet":
+		if len(args) > 2 {
+			var id int
+			fmt.Sscanf(args[1], "%d", &id)
+			params["id"] = id
+			params["enabled"] = args[2] == "1"
+		}
+	case "System.IdleInhibitorGet", "System.IdleInhibitorDestroy":
+		if len(args) > 1 {
+			var id int
+			fmt.Sscanf(args[1], "%d", &id)
+			params["id"] = id
+		}
+	case "System.InhibitSystem":
+		if len(args) > 1 {
+			params["on"] = args[1] == "1"
+		}
+	case "System.IsSystemInhibited":
 		// No args needed
 	}
 
