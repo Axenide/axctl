@@ -178,16 +178,10 @@ func (im *IdleManager) waitResumeInternal(timeoutMs uint32, inputOnly bool) erro
 	im.wlMu.Lock()
 	var notif *ext_idle_notify_v1.ExtIdleNotificationV1
 	var err error
-
-	// A timeout of 0 means we get notified the exact moment the seat is inactive.
-	// Since humans can't input continuously at the microsecond level, a 0ms listener
-	// will almost immediately fire 'idled' if the user isn't actively moving the mouse.
-	// Then, the moment they move it, it fires 'resumed'.
-	// This makes 'resume-wait' perfectly reliable regardless of the original timeout!
 	if inputOnly {
-		notif, err = im.notifier.GetInputIdleNotification(0, im.seat)
+		notif, err = im.notifier.GetInputIdleNotification(timeoutMs, im.seat)
 	} else {
-		notif, err = im.notifier.GetIdleNotification(0, im.seat)
+		notif, err = im.notifier.GetIdleNotification(timeoutMs, im.seat)
 	}
 
 	if err != nil {
@@ -214,7 +208,12 @@ func (im *IdleManager) waitResumeInternal(timeoutMs uint32, inputOnly bool) erro
 		}
 	})
 
-	callback, _ := im.display.Sync()
+	callback, err := im.display.Sync()
+	if err != nil {
+		notif.Destroy()
+		im.wlMu.Unlock()
+		return err
+	}
 	done := make(chan struct{})
 	callback.SetDoneHandler(func(e client.CallbackDoneEvent) { close(done) })
 	im.wlMu.Unlock()
@@ -222,21 +221,6 @@ func (im *IdleManager) waitResumeInternal(timeoutMs uint32, inputOnly bool) erro
 	select {
 	case <-done:
 	case <-time.After(2 * time.Second):
-	}
-
-	// We wait briefly. If 'idled' hasn't fired for a 0ms timer, the user is ACTIVELY
-	// spamming the keyboard/mouse right now. Thus, the system is already resumed.
-	time.Sleep(50 * time.Millisecond)
-
-	im.mu.Lock()
-	currentlyIdle := hasIdled
-	im.mu.Unlock()
-
-	if !currentlyIdle {
-		im.wlMu.Lock()
-		notif.Destroy()
-		im.wlMu.Unlock()
-		return nil
 	}
 
 	defer func() {
