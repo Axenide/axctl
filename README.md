@@ -1,6 +1,8 @@
-# axctl
+<p align="center">
+<img src="./assets/axctl.png" alt="axctl banner" style="width: 50%;" align="center" />
+</p>
 
-axctl is a universal IPC daemon and CLI for Wayland compositors. It normalizes
+**axctl** is a universal IPC daemon and CLI for Wayland compositors. It normalizes
 window, workspace, monitor, layout, config, and system operations across
 Hyprland, Niri, and MangoWC via a JSON-RPC API over a Unix socket.
 
