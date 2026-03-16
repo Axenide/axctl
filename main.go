@@ -662,6 +662,8 @@ func handleRPC(category string, args []string) {
 		}
 	case "System.IsSystemInhibited":
 		// No args needed
+	case "System.Exit":
+		// No args needed - exits the compositor
 	}
 
 	socketPath := fmt.Sprintf("/tmp/axctl-%d.sock", os.Getuid())
