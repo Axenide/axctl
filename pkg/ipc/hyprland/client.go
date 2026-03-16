@@ -562,7 +562,7 @@ func (h *Hyprland) Execute(command string) error {
 }
 
 func (h *Hyprland) Exit() error {
-	_, err := h.dispatch("exit")
+	_, err := h.dispatch("dispatch exit")
 	return err
 }
 
