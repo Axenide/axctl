@@ -14,7 +14,7 @@ import (
 	"axctl/pkg/config"
 	"axctl/pkg/ipc"
 	"axctl/pkg/ipc/hyprland"
-	"axctl/pkg/ipc/mangowc"
+	"axctl/pkg/ipc/mango"
 	"axctl/pkg/ipc/niri"
 	"axctl/pkg/server"
 )
@@ -259,10 +259,10 @@ func runDaemon() {
 		}
 	}
 
-	// 3. Try MangoWC fallback
+	// 3. Try Mango fallback
 	if comp == nil && err == nil {
 		// First try the current WAYLAND_DISPLAY
-		c, e := mangowc.New()
+		c, e := mango.New()
 		if e == nil {
 			comp = c
 			err = nil
@@ -281,7 +281,7 @@ func runDaemon() {
 					continue // Already tried
 				}
 				os.Setenv("WAYLAND_DISPLAY", filepath.Base(wlSock))
-				c, e = mangowc.New()
+				c, e = mango.New()
 				if e == nil {
 					comp = c
 					err = nil
@@ -290,7 +290,7 @@ func runDaemon() {
 			}
 
 			if comp == nil {
-				fmt.Printf("Debug - MangoWC detection failed on all sockets.\n")
+				fmt.Printf("Debug - Mango detection failed on all sockets.\n")
 			}
 		}
 	}

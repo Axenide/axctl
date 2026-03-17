@@ -6,7 +6,7 @@ import (
 	"axctl/pkg/ipc"
 	"axctl/pkg/ipc/hyprland"
 	"axctl/pkg/ipc/niri"
-	"axctl/pkg/ipc/mangowc"
+	"axctl/pkg/ipc/mango"
 )
 
 type ConfigHandler struct {
@@ -21,8 +21,8 @@ func NewConfigHandler(c ipc.Compositor) *ConfigHandler {
 		gen = &hyprland.Generator{}
 	case *niri.Niri:
 		gen = &niri.Generator{}
-	case *mangowc.Mangowc:
-		gen = &mangowc.Generator{}
+	case *mango.Mango:
+		gen = &mango.Generator{}
 	default:
 		gen = nil
 	}

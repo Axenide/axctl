@@ -92,7 +92,7 @@ func (s *Server) watchEvents() {
 			if addr, ok := e.Payload["address"].(string); ok {
 				s.cache.MarkWindowFocused(addr)
 			}
-			// Track window in cache if not already present (helps MangoWC accumulate windows)
+			// Track window in cache if not already present (helps Mango accumulate windows)
 			if e.Window != nil && e.Window.ID != "" {
 				existing := s.cache.GetWindows()
 				found := false

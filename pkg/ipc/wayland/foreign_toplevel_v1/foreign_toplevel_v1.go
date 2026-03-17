@@ -1,6 +1,6 @@
 // Hand-written Go bindings for wlr-foreign-toplevel-management-unstable-v1
 // Based on: pkg/ipc/wayland/protocols/wlr-foreign-toplevel-management-unstable-v1.xml
-// Following the exact patterns from pkg/ipc/mangowc/dwlipc/dwl_ipc.go
+// Following the exact patterns from pkg/ipc/mango/dwlipc/dwl_ipc.go
 //
 // wlr_foreign_toplevel_management_unstable_v1 Protocol Copyright:
 //

@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "Axctl Universal Wayland RPC Schema",
-  "description": "Universal JSON-RPC structures for Axctl to interact with Wayland compositors (Hyprland, Niri, MangoWC, etc.)",
+  "description": "Universal JSON-RPC structures for Axctl to interact with Wayland compositors (Hyprland, Niri, Mango, etc.)",
   "type": "object",
   "definitions": {
     "Monitor": {

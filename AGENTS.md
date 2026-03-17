@@ -5,7 +5,7 @@
 **Branch:** master
 
 ## OVERVIEW
-Universal IPC daemon for Wayland compositors (Hyprland, Niri, Mangowc) written in Go. Provides a unified JSON-RPC API for window and workspace management.
+Universal IPC daemon for Wayland compositors (Hyprland, Niri, Mango) written in Go. Provides a unified JSON-RPC API for window and workspace management.
 
 ## STRUCTURE
 ```
@@ -15,7 +15,7 @@ Universal IPC daemon for Wayland compositors (Hyprland, Niri, Mangowc) written i
 │   ├── ipc/        # Core interfaces, types, and compositor adapters
 │   │   ├── hyprland/
 │   │   ├── niri/
-│   │   └── mangowc/
+│   │   └── mango/
 │   └── server/     # JSON-RPC server over Unix Domain Socket
 └── go.mod
 ```
@@ -64,4 +64,4 @@ go build -o axctl ./cmd/axctl/main.go
 ## NOTES
 - **Hyprland**: Uses `$HYPRLAND_INSTANCE_SIGNATURE` for socket paths.
 - **Niri**: Uses `$NIRI_SOCKET` for IPC.
-- **Mangowc**: Uses `/run/user/$UID/mangowc.sock`.
+- **Mango**: Uses `/run/user/$UID/mango.sock`.

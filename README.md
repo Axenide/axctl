@@ -4,11 +4,11 @@
 
 **axctl** is a universal IPC daemon and CLI for Wayland compositors. It normalizes
 window, workspace, monitor, layout, config, and system operations across
-Hyprland, Niri, and MangoWC via a JSON-RPC API over a Unix socket.
+Hyprland, Niri, and Mango via a JSON-RPC API over a Unix socket.
 
 ## What it does
 
-- Runs a compositor-aware daemon that auto-detects Hyprland, Niri, or MangoWC
+- Runs a compositor-aware daemon that auto-detects Hyprland, Niri, or Mango
 - Exposes a single JSON-RPC interface over `/tmp/axctl-$UID.sock`
 - Provides a CLI for window and workspace management, configuration, and system
   helpers
@@ -18,7 +18,7 @@ Hyprland, Niri, and MangoWC via a JSON-RPC API over a Unix socket.
 
 - Hyprland
 - Niri
-- MangoWC
+- Mango
 
 ## Architecture overview
 
@@ -191,7 +191,7 @@ See `pkg/config/example.toml` for the full configuration reference.
 The daemon uses these environment variables to detect sockets:
 
 - `XDG_RUNTIME_DIR` for Wayland sockets
-- `WAYLAND_DISPLAY` for MangoWC fallback
+- `WAYLAND_DISPLAY` for Mango fallback
 - `NIRI_SOCKET` for Niri
 - `HYPRLAND_INSTANCE_SIGNATURE` for Hyprland
 

@@ -36,7 +36,7 @@ func MangoColor(colorStr string) string {
 		c = c[2:]
 	}
 
-	// MangoWC strictly expects RRGGBBAA (uint32).
+	// Mango strictly expects RRGGBBAA (uint32).
 	// If alpha is missing (6 chars), passing "0xff0000" causes it to be parsed as 0x00FF0000
 	// R=0x00, G=0xFF, B=0x00, A=0x00 -> fully transparent green!
 	if len(c) == 6 {
