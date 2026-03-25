@@ -171,6 +171,8 @@ type ConfigUniversal struct {
 	Keybinds    ConfigKeybinds   `json:"keybinds"`
 	WindowRules []WindowRule     `json:"window_rules"`
 	LayerRules  []LayerRule      `json:"layer_rules"`
+	Exec        []string         `json:"exec,omitempty"`
+	ExecOnce    []string         `json:"exec_once,omitempty"`
 }
 
 // ConfigGenerator transforms a universal configuration into a compositor-specific syntax
@@ -185,4 +187,5 @@ type ConfigGenerator interface {
 	GenerateWindowRules(rules []WindowRule) string
 	// GenerateLayerRules outputs the layer rule declarations
 	GenerateLayerRules(rules []LayerRule) string
+	GenerateStartup(exec []string, execOnce []string) string
 }

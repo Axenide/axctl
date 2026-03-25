@@ -216,6 +216,34 @@ func mergeConfig(dst, src *TOMLConfig) {
 	if len(src.LayerRules) > 0 {
 		dst.LayerRules = append(dst.LayerRules, src.LayerRules...)
 	}
+
+	if src.Startup != nil {
+		if dst.Startup == nil {
+			dst.Startup = &StartupConfig{}
+		}
+		mergeExec(&dst.Startup.Exec, src.Startup.Exec)
+		mergeExec(&dst.Startup.ExecOnce, src.Startup.ExecOnce)
+	}
+
+	mergeExec(&dst.Exec, src.Exec)
+	mergeExec(&dst.ExecOnce, src.ExecOnce)
+}
+
+func mergeExec(dst *interface{}, src interface{}) {
+	if src == nil {
+		return
+	}
+	if *dst == nil {
+		*dst = src
+		return
+	}
+
+	var merged []string
+	appendExecCommands(&merged, *dst)
+	appendExecCommands(&merged, src)
+	if len(merged) > 0 {
+		*dst = merged
+	}
 }
 
 func mergeAppearance(dst, src *AppearanceConfig) {

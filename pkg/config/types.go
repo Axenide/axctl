@@ -11,6 +11,14 @@ type TOMLConfig struct {
 	Keybinds    []KeybindConfig    `toml:"keybinds,omitempty"`
 	WindowRules []WindowRuleConfig `toml:"window_rules,omitempty"`
 	LayerRules  []LayerRuleConfig  `toml:"layer_rules,omitempty"`
+	Startup     *StartupConfig     `toml:"startup,omitempty"`
+	Exec        interface{}        `toml:"exec,omitempty"`
+	ExecOnce    interface{}        `toml:"exec-once,omitempty"`
+}
+
+type StartupConfig struct {
+	Exec     interface{} `toml:"exec,omitempty"`
+	ExecOnce interface{} `toml:"exec-once,omitempty"`
 }
 
 type GeneralConfig struct {
@@ -198,7 +206,41 @@ func (c *TOMLConfig) ToIPCConfig() ipc.ConfigUniversal {
 		})
 	}
 
+	if c.Startup != nil {
+		appendExecCommands(&cfg.Exec, c.Startup.Exec)
+		appendExecCommands(&cfg.ExecOnce, c.Startup.ExecOnce)
+	}
+
+	appendExecCommands(&cfg.Exec, c.Exec)
+	appendExecCommands(&cfg.ExecOnce, c.ExecOnce)
+
 	return cfg
+}
+
+func appendExecCommands(dst *[]string, raw interface{}) {
+	if raw == nil {
+		return
+	}
+
+	switch value := raw.(type) {
+	case string:
+		if value != "" {
+			*dst = append(*dst, value)
+		}
+	case []string:
+		for _, item := range value {
+			if item != "" {
+				*dst = append(*dst, item)
+			}
+		}
+	case []interface{}:
+		for _, item := range value {
+			str, ok := item.(string)
+			if ok && str != "" {
+				*dst = append(*dst, str)
+			}
+		}
+	}
 }
 
 // ToBatchKeybindsPayload converts keybinds to the IPC batch payload format.

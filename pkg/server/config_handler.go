@@ -1,14 +1,14 @@
 package server
 
 import (
+	"axctl/pkg/ipc"
+	"axctl/pkg/ipc/hyprland"
+	"axctl/pkg/ipc/mango"
+	"axctl/pkg/ipc/niri"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
-	"axctl/pkg/ipc"
-	"axctl/pkg/ipc/hyprland"
-	"axctl/pkg/ipc/niri"
-	"axctl/pkg/ipc/mango"
 )
 
 type ConfigHandler struct {
@@ -54,13 +54,21 @@ func (h *ConfigHandler) ApplyConfig(payload ipc.ConfigUniversal) error {
 	if h.generator == nil {
 		return fmt.Errorf("ConfigGenerator not supported for this compositor")
 	}
+	startupStr := h.generator.GenerateStartup(payload.Exec, payload.ExecOnce)
 	appStr := h.generator.GenerateAppearance(payload.Appearance)
 	bindStr := h.generator.GenerateKeybinds(payload.Keybinds)
 	rulesStr := h.generator.GenerateWindowRules(payload.WindowRules)
 	layerStr := h.generator.GenerateLayerRules(payload.LayerRules)
+	if startupStr != "" {
+		appStr = strings.TrimPrefix(appStr, "# ▄    ▄▄▄  ▄▄ ▄▄  ▄▄▄▄ ▄▄▄▄▄▄ ▄▄    \n#  ▀▄ ██▀██ ▀█▄█▀ ██▀▀▀   ██   ██    \n# ▄▀  ██▀██ ██ ██ ▀████   ██   ██▄▄▄ \n\n")
+	}
 
 	// Combine all generated config
 	var fullConfig strings.Builder
+	fullConfig.WriteString(startupStr)
+	if startupStr != "" {
+		fullConfig.WriteString("\n")
+	}
 	fullConfig.WriteString(appStr)
 	fullConfig.WriteString("\n")
 	fullConfig.WriteString(bindStr)
