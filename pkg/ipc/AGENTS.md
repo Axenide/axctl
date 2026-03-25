@@ -28,3 +28,4 @@ pkg/ipc/
 - **Package Leaks**: Do not expose compositor-specific types outside of their respective packages.
 - **Blocking Calls**: Ensure event subscriptions do not block the main command execution path.
 - **Direct Net Dial**: Always use the provided abstraction rather than manual socket dialing.
+- **Thread Safety**: In `pkg/server/idle.go`, ALWAYS set handler BEFORE unlocking mutex.
