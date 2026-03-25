@@ -11,16 +11,29 @@ import (
 const maxImportDepth = 10
 
 // DefaultConfigPath returns the resolved path to the axctl config file.
-// Checks $XDG_CONFIG_HOME/axctl/config.toml first, falls back to ~/.config/axctl/config.toml.
+// Checks $XDG_CONFIG_HOME/axctl/config.toml (or ~/.config/axctl/config.toml) first,
+// falls back to ~/.local/share/ambxst/axctl.toml.
 func DefaultConfigPath() string {
-	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
-		return filepath.Join(xdg, "axctl", "config.toml")
+	primaryPath := func() string {
+		if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
+			return filepath.Join(xdg, "axctl", "config.toml")
+		}
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return filepath.Join(os.Getenv("HOME"), ".config", "axctl", "config.toml")
+		}
+		return filepath.Join(home, ".config", "axctl", "config.toml")
+	}()
+
+	if _, err := os.Stat(primaryPath); err == nil {
+		return primaryPath
 	}
+
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return filepath.Join(os.Getenv("HOME"), ".config", "axctl", "config.toml")
+		return primaryPath
 	}
-	return filepath.Join(home, ".config", "axctl", "config.toml")
+	return filepath.Join(home, ".local", "share", "ambxst", "axctl.toml")
 }
 
 // LoadConfig loads and merges a TOML configuration file, resolving imports.
@@ -174,6 +187,15 @@ func mergeConfig(dst, src *TOMLConfig) {
 		mergeAppearance(dst.Appearance, src.Appearance)
 	}
 
+	if src.General != nil {
+		if dst.General == nil {
+			dst.General = &GeneralConfig{}
+		}
+		if src.General.Layout != "" {
+			dst.General.Layout = src.General.Layout
+		}
+	}
+
 	if src.Input != nil {
 		if dst.Input == nil {
 			dst.Input = &InputConfig{}
@@ -189,6 +211,10 @@ func mergeConfig(dst, src *TOMLConfig) {
 
 	if len(src.WindowRules) > 0 {
 		dst.WindowRules = append(dst.WindowRules, src.WindowRules...)
+	}
+
+	if len(src.LayerRules) > 0 {
+		dst.LayerRules = append(dst.LayerRules, src.LayerRules...)
 	}
 }
 

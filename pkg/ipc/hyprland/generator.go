@@ -9,7 +9,6 @@ import (
 
 type Generator struct{}
 
-// NewGenerator returns a new instance of the Hyprland config generator
 func NewGenerator() *Generator {
 	return &Generator{}
 }
@@ -46,7 +45,13 @@ func parseColorString(str string) (string, string) {
 	for _, part := range parts {
 		if strings.HasSuffix(part, "deg") {
 			angle = part
-		} else if strings.HasPrefix(part, "#") || len(part) == 6 || len(part) == 8 {
+			continue
+		}
+		if strings.HasPrefix(part, "rgb(") || strings.HasPrefix(part, "rgba(") {
+			colors = append(colors, part)
+			continue
+		}
+		if strings.HasPrefix(part, "#") || len(part) == 6 || len(part) == 8 {
 			colors = append(colors, formatHyprlandColor(part))
 		}
 	}
@@ -93,6 +98,9 @@ func (g *Generator) GenerateAppearance(config ipc.ConfigAppearance) string {
 			}
 		}
 	}
+	if config.Layout != nil && *config.Layout != "" {
+		out.WriteString(fmt.Sprintf("    layout = %s\n", *config.Layout))
+	}
 	out.WriteString("}\n\n")
 
 	out.WriteString("decoration {\n")
@@ -109,16 +117,18 @@ func (g *Generator) GenerateAppearance(config ipc.ConfigAppearance) string {
 	}
 
 	if config.Shadow != nil && config.Shadow.Enabled != nil {
-		out.WriteString(fmt.Sprintf("    drop_shadow = %v\n", *config.Shadow.Enabled))
+		out.WriteString("    shadow {\n")
+		out.WriteString(fmt.Sprintf("        enabled = %v\n", *config.Shadow.Enabled))
 		if config.Shadow.Size != nil {
-			out.WriteString(fmt.Sprintf("    shadow_range = %d\n", *config.Shadow.Size))
+			out.WriteString(fmt.Sprintf("        range = %d\n", *config.Shadow.Size))
 		}
 		if config.Shadow.Color != nil {
 			colorStr, _ := parseColorString(*config.Shadow.Color)
 			if colorStr != "" {
-				out.WriteString(fmt.Sprintf("    col.shadow = %s\n", colorStr))
+				out.WriteString(fmt.Sprintf("        color = %s\n", colorStr))
 			}
 		}
+		out.WriteString("    }\n")
 	}
 
 	out.WriteString("    blur {\n")
@@ -141,12 +151,20 @@ func (g *Generator) GenerateAppearance(config ipc.ConfigAppearance) string {
 	out.WriteString("}\n\n")
 
 	if config.Animations != nil && config.Animations.Enabled != nil {
-		out.WriteString("animations {\n")
 		enabled := "false"
 		if *config.Animations.Enabled {
 			enabled = "true"
 		}
+		out.WriteString("animations {\n")
 		out.WriteString(fmt.Sprintf("    enabled = %s\n", enabled))
+		if enabled == "true" {
+			out.WriteString("\n")
+			out.WriteString("    bezier = myBezier, 0.4, 0.0, 0.2, 1.0\n")
+			out.WriteString("    animation = windows, 1, 2.5, myBezier, popin 80%\n")
+			out.WriteString("    animation = border, 1, 2.5, myBezier\n")
+			out.WriteString("    animation = fade, 1, 2.5, myBezier\n")
+			out.WriteString("    animation = workspaces, 1, 2.5, myBezier, slidefade 20%\n")
+		}
 		out.WriteString("}\n")
 	}
 
@@ -158,6 +176,23 @@ func formatModifiers(mods []string) string {
 		return ""
 	}
 	return strings.Join(mods, " ")
+}
+
+// convertMatchFormat converts "class:^(value)$" to "match:class = value"
+func convertMatchFormat(match string) string {
+	if match == "" {
+		return ""
+	}
+	parts := strings.SplitN(match, ":", 2)
+	if len(parts) < 2 {
+		return "match:" + match
+	}
+	prop := parts[0]
+	value := parts[1]
+	value = strings.TrimPrefix(value, "^")
+	value = strings.TrimSuffix(value, "$")
+	value = strings.Trim(value, "()")
+	return "match:" + prop + " = " + value
 }
 
 func (g *Generator) GenerateKeybinds(config ipc.ConfigKeybinds) string {
@@ -175,14 +210,21 @@ func (g *Generator) GenerateKeybinds(config ipc.ConfigKeybinds) string {
 			dispatcher = "exec"
 		}
 		arg := kb.Argument
-		
-		// Map generic modifiers to Hyprland's
+
+		bindKw := "bind"
+		if strings.HasPrefix(strings.ToLower(kb.Key), "mouse:") {
+			bindKw = "bindm"
+		}
+
 		mod = strings.ReplaceAll(mod, "SUPER", "SUPER")
 		mod = strings.ReplaceAll(mod, "CTRL", "CTRL")
 		mod = strings.ReplaceAll(mod, "ALT", "ALT")
 		mod = strings.ReplaceAll(mod, "SHIFT", "SHIFT")
 
-		line := fmt.Sprintf("bind = %s, %s, %s, %s", mod, kb.Key, dispatcher, arg)
+		line := fmt.Sprintf("%s = %s, %s, %s", bindKw, mod, kb.Key, dispatcher)
+		if strings.TrimSpace(arg) != "" {
+			line += fmt.Sprintf(", %s", arg)
+		}
 		if comment != "" {
 			line += fmt.Sprintf(" # %s", comment)
 		}
@@ -217,9 +259,145 @@ func (g *Generator) GenerateWindowRules(rules []ipc.WindowRule) string {
 	out.WriteString("# Do not edit manually!\n\n")
 
 	for _, r := range rules {
-		if r.Match != "" && r.Rule != "" {
+		useBlockSyntax := r.Float != nil || r.NoBlur != nil || r.NoShadow != nil ||
+			r.Rounding != nil || r.BorderSize != nil || r.Pin != nil ||
+			r.Fullscreen != nil || r.IdleInhibit != nil || r.NoScreenShare != nil ||
+			r.Move != nil || r.Size != nil
+
+		if useBlockSyntax && r.Match != "" {
+			// For named rules (with Name set), use block syntax with name first
+			if r.Name != "" {
+				out.WriteString("windowrule {\n")
+				out.WriteString(fmt.Sprintf("    name = %s\n", r.Name))
+				matchStr := convertMatchFormat(r.Match)
+				out.WriteString(fmt.Sprintf("    %s\n", matchStr))
+
+				if r.Float != nil && *r.Float {
+					out.WriteString("    float = on\n")
+				}
+				if r.NoBlur != nil && *r.NoBlur {
+					out.WriteString("    no_blur = on\n")
+				}
+				if r.NoShadow != nil && *r.NoShadow {
+					out.WriteString("    no_shadow = on\n")
+				}
+				if r.Rounding != nil {
+					out.WriteString(fmt.Sprintf("    rounding = %d\n", *r.Rounding))
+				}
+				if r.BorderSize != nil {
+					out.WriteString(fmt.Sprintf("    border_size = %d\n", *r.BorderSize))
+				}
+				if r.Pin != nil && *r.Pin {
+					out.WriteString("    pin = on\n")
+				}
+				if r.Fullscreen != nil && *r.Fullscreen {
+					out.WriteString("    fullscreen = on\n")
+				}
+				if r.IdleInhibit != nil && *r.IdleInhibit {
+					out.WriteString("    idle_inhibit = on\n")
+				}
+				if r.NoScreenShare != nil && *r.NoScreenShare {
+					out.WriteString("    no_screen_share = on\n")
+				}
+				if r.Move != nil && *r.Move != "" {
+					out.WriteString(fmt.Sprintf("    move = %s\n", *r.Move))
+				}
+				if r.Size != nil && *r.Size != "" {
+					out.WriteString(fmt.Sprintf("    size = %s\n", *r.Size))
+				}
+				out.WriteString("}\n\n")
+			} else {
+				// For anonymous rules (no Name), use single-line syntax
+				// Format: windowrule = rule1 = val1, rule2 = val2, match:prop = val
+				var props []string
+
+				if r.Float != nil && *r.Float {
+					props = append(props, "float = on")
+				}
+				if r.NoBlur != nil && *r.NoBlur {
+					props = append(props, "no_blur = on")
+				}
+				if r.NoShadow != nil && *r.NoShadow {
+					props = append(props, "no_shadow = on")
+				}
+				if r.Rounding != nil {
+					props = append(props, fmt.Sprintf("rounding = %d", *r.Rounding))
+				}
+				if r.BorderSize != nil {
+					props = append(props, fmt.Sprintf("border_size = %d", *r.BorderSize))
+				}
+				if r.Pin != nil && *r.Pin {
+					props = append(props, "pin = on")
+				}
+				if r.Fullscreen != nil && *r.Fullscreen {
+					props = append(props, "fullscreen = on")
+				}
+				if r.IdleInhibit != nil && *r.IdleInhibit {
+					props = append(props, "idle_inhibit = on")
+				}
+				if r.NoScreenShare != nil && *r.NoScreenShare {
+					props = append(props, "no_screen_share = on")
+				}
+				if r.Move != nil && *r.Move != "" {
+					props = append(props, fmt.Sprintf("move = %s", *r.Move))
+				}
+				if r.Size != nil && *r.Size != "" {
+					props = append(props, fmt.Sprintf("size = %s", *r.Size))
+				}
+
+				matchStr := convertMatchFormat(r.Match)
+				props = append(props, matchStr)
+
+				out.WriteString("windowrule = " + strings.Join(props, ", ") + "\n\n")
+			}
+		} else if r.Match != "" && r.Rule != "" {
 			out.WriteString(fmt.Sprintf("windowrulev2 = %s, %s\n", r.Rule, r.Match))
 		}
+	}
+
+	return out.String()
+}
+
+func (g *Generator) GenerateLayerRules(rules []ipc.LayerRule) string {
+	var out strings.Builder
+	out.WriteString("# Generated by axctl ConfigGenerator (Layer Rules)\n")
+	out.WriteString("# Do not edit manually!\n\n")
+
+	for _, r := range rules {
+		if r.Namespace == "" {
+			continue
+		}
+
+		// Use single-line syntax for layer rules (no Name field exists)
+		// Format: layerrule = rule1 = val1, rule2 = val2, match:namespace = value
+		var props []string
+
+		if r.NoAnim != nil && *r.NoAnim {
+			props = append(props, "no_anim = on")
+		}
+		if r.Blur != nil && *r.Blur {
+			props = append(props, "blur = on")
+		}
+		if r.BlurPopups != nil && *r.BlurPopups {
+			props = append(props, "blur_popups = on")
+		}
+		if r.IgnoreAlpha != nil && *r.IgnoreAlpha {
+			props = append(props, "ignore_alpha = on")
+		}
+		if r.IgnoreZeroAlpha != nil && *r.IgnoreZeroAlpha {
+			props = append(props, "ignore_zero_alpha = on")
+		}
+		if r.NoShadow != nil && *r.NoShadow {
+			props = append(props, "no_shadow = on")
+		}
+		if r.IgnoreAlphaValue != nil {
+			props = append(props, fmt.Sprintf("ignore_alpha = %.2f", *r.IgnoreAlphaValue))
+		}
+
+		matchStr := fmt.Sprintf("match:namespace = %s", r.Namespace)
+		props = append(props, matchStr)
+
+		out.WriteString("layerrule = " + strings.Join(props, ", ") + "\n\n")
 	}
 
 	return out.String()

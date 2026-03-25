@@ -51,6 +51,7 @@ type ConfigAppearance struct {
 	Blur       *Blur       `json:"blur,omitempty"`
 	Shadow     *Shadow     `json:"shadow,omitempty"`
 	Animations *Animations `json:"animations,omitempty"`
+	Layout     *string     `json:"layout,omitempty"`
 }
 
 // Keybind represents a single keyboard shortcut
@@ -117,10 +118,51 @@ type ConfigKeybinds struct {
 }
 
 // WindowRule represents a generic window rule
+// Supports both legacy single-line syntax (match, rule, action) and
+// block syntax with individual window rule properties.
 type WindowRule struct {
+	// Legacy single-line syntax fields (kept for backward compatibility)
 	Match  string `json:"match"`
 	Rule   string `json:"rule"`
 	Action string `json:"action"`
+
+	// Block syntax fields for granular window rule control
+	// Float makes the window floating
+	Float *bool `json:"float,omitempty"`
+	// NoBlur disables blur effect on the window
+	NoBlur *bool `json:"no_blur,omitempty"`
+	// NoShadow disables shadow on the window
+	NoShadow *bool `json:"no_shadow,omitempty"`
+	// Rounding sets the window corner rounding (0 to disable)
+	Rounding *int `json:"rounding,omitempty"`
+	// BorderSize sets the window border size
+	BorderSize *int `json:"border_size,omitempty"`
+	// Pin pins the window to all workspaces
+	Pin *bool `json:"pin,omitempty"`
+	// Fullscreen sets the window to fullscreen state
+	Fullscreen *bool `json:"fullscreen,omitempty"`
+	// IdleInhibit inhibits idle timeout while window is focused
+	IdleInhibit *bool `json:"idle_inhibit,omitempty"`
+	// NoScreenShare disables screen sharing for the window
+	NoScreenShare *bool `json:"no_screen_share,omitempty"`
+	// Move sets the window position (e.g., "100,100" or "center")
+	Move *string `json:"move,omitempty"`
+	// Size sets the window size (e.g., "800x600" or "auto")
+	Size *string `json:"size,omitempty"`
+	// Name is the identifier for named windowrules (block syntax)
+	Name string `json:"name,omitempty"`
+}
+
+// LayerRule represents a Hyprland layer rule configuration.
+type LayerRule struct {
+	NoAnim           *bool    `json:"no_anim,omitempty"`
+	Blur             *bool    `json:"blur,omitempty"`
+	BlurPopups       *bool    `json:"blur_popups,omitempty"`
+	IgnoreAlpha      *bool    `json:"ignore_alpha,omitempty"`
+	NoShadow         *bool    `json:"no_shadow,omitempty"`
+	IgnoreZeroAlpha  *bool    `json:"ignore_zero_alpha,omitempty"`
+	IgnoreAlphaValue *float64 `json:"ignore_alpha_value,omitempty"`
+	Namespace        string   `json:"namespace"`
 }
 
 // ConfigUniversal holds the entire configuration state
@@ -128,6 +170,7 @@ type ConfigUniversal struct {
 	Appearance  ConfigAppearance `json:"appearance"`
 	Keybinds    ConfigKeybinds   `json:"keybinds"`
 	WindowRules []WindowRule     `json:"window_rules"`
+	LayerRules  []LayerRule      `json:"layer_rules"`
 }
 
 // ConfigGenerator transforms a universal configuration into a compositor-specific syntax
@@ -140,6 +183,6 @@ type ConfigGenerator interface {
 
 	// GenerateWindowRules outputs the window rule declarations
 	GenerateWindowRules(rules []WindowRule) string
+	// GenerateLayerRules outputs the layer rule declarations
+	GenerateLayerRules(rules []LayerRule) string
 }
-
-// Helper to format a flat map into nested universal config, or we can just use universal config directly.

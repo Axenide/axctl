@@ -22,3 +22,8 @@ func (g *Generator) GenerateKeybinds(config ipc.ConfigKeybinds) string {
 func (g *Generator) GenerateWindowRules(rules []ipc.WindowRule) string {
 	return "# Mango Window Rules Configuration Stub\n"
 }
+
+
+func (g *Generator) GenerateLayerRules(rules []ipc.LayerRule) string {
+	return "# Mango Layer Rules Configuration Stub\n"
+}

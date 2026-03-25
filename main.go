@@ -35,17 +35,32 @@ func main() {
 		return
 	}
 
-	switch os.Args[1] {
+	customConfigPath := ""
+
+	// Parse -c flag before command (only for daemon command)
+	i := 1
+	for i < len(os.Args) && os.Args[i] != "daemon" {
+		if os.Args[i] == "-c" && i+1 < len(os.Args) {
+			customConfigPath = os.Args[i+1]
+			i += 2
+		} else {
+			break
+		}
+	}
+
+	// Shift args to remove parsed flags
+	remainingArgs := os.Args[i:]
+	switch remainingArgs[0] {
 	case "daemon":
-		runDaemon()
+		runDaemon(customConfigPath)
 	case "subscribe":
 		runSubscribe()
 	case "window", "workspace", "monitor", "layout", "config", "system":
-		if len(os.Args) < 3 {
+		if len(remainingArgs) < 2 {
 			usage()
 			return
 		}
-		handleRPC(os.Args[1], os.Args[2:])
+		handleRPC(remainingArgs[0], remainingArgs[1:])
 	default:
 		usage()
 	}
@@ -65,7 +80,9 @@ func printVersion() {
 }
 
 func usage() {
-	fmt.Println("Usage: axctl <command> <action> [args]")
+	fmt.Println("Usage: axctl [-c <path>] <command> <action> [args]")
+	fmt.Println("\nOptions:")
+	fmt.Println("  -c <path>                 Use custom config file path (daemon only)")
 	fmt.Println("\nCommands:")
 	fmt.Println("  daemon                    Start the IPC daemon")
 	fmt.Println("  subscribe                 Stream events from the daemon")
@@ -186,7 +203,7 @@ func findLatestSocket(pattern string) string {
 	return latest
 }
 
-func runDaemon() {
+func runDaemon(customConfigPath string) {
 	var comp ipc.Compositor
 	var err error
 
@@ -322,7 +339,10 @@ func runDaemon() {
 
 	// Load TOML config if it exists
 	var cfgWatcher *config.ConfigWatcher
-	configPath := config.DefaultConfigPath()
+	configPath := customConfigPath
+	if configPath == "" {
+		configPath = config.DefaultConfigPath()
+	}
 	if _, statErr := os.Stat(configPath); statErr == nil {
 		cfg, cfgErr := config.LoadConfig(configPath)
 		if cfgErr != nil {
