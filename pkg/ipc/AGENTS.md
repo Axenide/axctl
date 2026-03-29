@@ -17,7 +17,8 @@ pkg/ipc/
 ## WHERE TO LOOK
 - **Interface Definition**: `interface.go` is the source of truth for all supported actions.
 - **Shared Types**: `types.go` defines the cross-compositor schema for windows and workspaces.
-- **Testing**: `mock/compositor.go` should be used for all unit tests requiring IPC.
+- **Testing**: `mock/compositor.go` provides call tracking, error injection, and event emission for tests.
+- **Cache**: `cache.go` provides memory-backed state for rapid read-only queries.
 
 ## CONVENTIONS
 - **ID Normalization**: Convert all compositor-specific IDs to normalized strings.

@@ -1,7 +1,7 @@
 # PROJECT KNOWLEDGE BASE
 
-**Generated:** 2026-03-25T16:51:00Z
-**Commit:** 9fe31a8
+**Generated:** 2026-03-29T17:00:00Z
+**Commit:** d8b2f0e
 **Branch:** dev
 
 ## OVERVIEW
@@ -48,10 +48,18 @@ Universal IPC daemon for Wayland compositors (Hyprland, Niri, Mango) written in 
 - **Direct Socket Access**: CLI must go through the Daemon, not talk to compositors directly.
 - **Hardcoded IDs**: IDs can be hexadecimal (Hyprland) or integers (Niri); always treat as strings in the abstraction.
 - **Thread Safety**: In `pkg/server/idle.go`, ALWAYS set handler BEFORE unlocking mutex (see line ~295).
+- **Generated Code**: Never manually edit files with `//go:generate` (e.g., `pkg/ipc/wayland/client/*.go`).
 
 ## UNIQUE STYLES
 - **Adapter Pattern**: Each compositor is a separate package implementing the `Compositor` interface.
 - **State Caching**: Read-only queries are served from memory, updated by an event subscriber loop.
+- **Mock Testing**: Tests use `pkg/ipc/mock/compositor.go` for call tracking and error injection.
+
+## TESTING
+- **Location**: `pkg/ipc/mock/` (26 tests: 20 in compositor_test.go, 6 in examples_test.go)
+- **Framework**: Standard Go `testing` package
+- **Pattern**: Mock-based with call verification and error injection
+- **Run**: `go test ./...`
 
 ## COMMANDS
 ```bash
