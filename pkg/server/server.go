@@ -895,6 +895,34 @@ func (s *Server) handleConnection(conn net.Conn) {
 			} else {
 				result = "false"
 			}
+		case "System.AppInhibitCheck":
+			if s.idleMgr == nil {
+				resp.Error = "Idle management not supported on this session"
+				break
+			}
+			var p struct {
+				Patterns []string `json:"patterns"`
+			}
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
+			matches, e := s.idleMgr.AppInhibitorCheck(p.Patterns)
+			err = e
+			if err == nil {
+				result = matches
+			}
+
+		case "System.MediaInhibitCheck":
+			if s.idleMgr == nil {
+				resp.Error = "Idle management not supported on this session"
+				break
+			}
+			mediaResult, e := s.idleMgr.MediaInhibitorCheck()
+			err = e
+			if err == nil {
+				result = mediaResult
+			}
 
 		case "System.Exit":
 			err = s.compositor.Exit()

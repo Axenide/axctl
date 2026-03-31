@@ -2,8 +2,11 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"time"
 
@@ -56,7 +59,7 @@ type idleInhibitor struct {
 type systemInhibitor struct {
 	enabled bool
 	cmd     *exec.Cmd
-	ctx    context.Context
+	ctx     context.Context
 	cancel  context.CancelFunc
 }
 
@@ -493,6 +496,7 @@ func (im *IdleManager) refreshMonitor(mon *idleMonitor) error {
 	if !enabled {
 		return nil
 	}
+
 	if im.notifier == nil || im.seat == nil {
 		return fmt.Errorf("idle_notify not supported by compositor")
 	}
@@ -500,7 +504,12 @@ func (im *IdleManager) refreshMonitor(mon *idleMonitor) error {
 	im.wlMu.Lock()
 	var notif *ext_idle_notify_v1.ExtIdleNotificationV1
 	var err error
-	if respectInhibitors {
+
+	hyprlandNoInhibitorSupport := os.Getenv("HYPRLAND_INSTANCE_SIGNATURE") != "" && respectInhibitors
+
+	if hyprlandNoInhibitorSupport {
+		notif, err = im.notifier.GetInputIdleNotification(timeoutMs, im.seat)
+	} else if respectInhibitors {
 		notif, err = im.notifier.GetIdleNotification(timeoutMs, im.seat)
 	} else {
 		notif, err = im.notifier.GetInputIdleNotification(timeoutMs, im.seat)
@@ -660,7 +669,6 @@ func (im *IdleManager) setInhibitorEnabledLocked(inh *idleInhibitor, enabled boo
 	return nil
 }
 
-
 func (im *IdleManager) InhibitSystem(on bool) error {
 	im.mu.Lock()
 	defer im.mu.Unlock()
@@ -716,4 +724,310 @@ func (im *IdleManager) IsSystemInhibited() bool {
 	im.mu.Lock()
 	defer im.mu.Unlock()
 	return im.systemInhibitor.enabled
+}
+
+// MediaInhibitorCheck checks for active audio/sink-inputs via PulseAudio/PipeWire.
+// Returns a map with media info and count of active media streams.
+func (im *IdleManager) MediaInhibitorCheck() (map[string]interface{}, error) {
+	result := make(map[string]interface{})
+
+	count, apps := checkMediaApps()
+	result["count"] = count
+	result["apps"] = apps
+
+	return result, nil
+}
+
+func checkMediaApps() (int, []string) {
+	cmd := exec.Command("pactl", "list", "sink-inputs")
+	out, err := cmd.Output()
+	if err != nil {
+		return 0, nil
+	}
+
+	text := string(out)
+	if strings.TrimSpace(text) == "" {
+		return 0, nil
+	}
+
+	mediaBlacklist := []string{
+		"speech-dispatcher",
+		"speech-dispatcher-dummy",
+		"sndio",
+		"pipewire",
+		"wireplumber",
+		"galene",
+	}
+
+	var count int
+	var block strings.Builder
+	seen := make(map[string]bool)
+
+	for _, line := range strings.Split(text, "\n") {
+		trimmed := strings.TrimLeft(line, " ")
+		isHeader := strings.HasPrefix(trimmed, "Sink Input #") || strings.HasPrefix(trimmed, "SinkInput #")
+
+		if isHeader {
+			if block.Len() > 0 && sinkInputCounts(block.String()) {
+				if app := extractAppName(block.String()); app != "" && !seen[app] {
+					if !isBlacklisted(app, mediaBlacklist) {
+						seen[app] = true
+						count++
+					}
+				}
+			}
+			block.Reset()
+		}
+
+		block.WriteString(line)
+		block.WriteString("\n")
+	}
+
+	if block.Len() > 0 && sinkInputCounts(block.String()) {
+		if app := extractAppName(block.String()); app != "" && !seen[app] {
+			if !isBlacklisted(app, mediaBlacklist) {
+				seen[app] = true
+				count++
+			}
+		}
+	}
+
+	var apps []string
+	for app := range seen {
+		apps = append(apps, app)
+	}
+
+	return count, apps
+}
+
+func isBlacklisted(app string, blacklist []string) bool {
+	lcApp := strings.ToLower(app)
+	for _, b := range blacklist {
+		if strings.Contains(lcApp, strings.ToLower(b)) {
+			return true
+		}
+	}
+	return false
+}
+
+func sinkInputCounts(block string) bool {
+	lines := strings.Split(block, "\n")
+	for _, line := range lines {
+		t := strings.TrimSpace(line)
+		if strings.EqualFold(t, "Corked: yes") {
+			return false
+		}
+		if strings.EqualFold(t, "Mute: yes") {
+			return false
+		}
+	}
+	return true
+}
+
+func extractAppName(block string) string {
+	lines := strings.Split(block, "\n")
+	var inProps bool
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+
+		if trimmed == "Properties:" {
+			inProps = true
+			continue
+		}
+
+		if !inProps {
+			continue
+		}
+
+		if trimmed == "" {
+			continue
+		}
+
+		if !strings.HasPrefix(line, "\t") && !strings.HasPrefix(line, " ") {
+			break
+		}
+
+		if strings.HasPrefix(trimmed, "application.name = ") {
+			name := strings.Trim(strings.TrimPrefix(trimmed, "application.name = "), `"`)
+			return name
+		}
+		if strings.HasPrefix(trimmed, "application.process.binary = ") {
+			name := strings.Trim(strings.TrimPrefix(trimmed, "application.process.binary = "), `"`)
+			return name
+		}
+		if strings.HasPrefix(trimmed, "media.name = ") {
+			name := strings.Trim(strings.TrimPrefix(trimmed, "media.name = "), `"`)
+			return name
+		}
+	}
+
+	return ""
+}
+
+func (im *IdleManager) AppInhibitorCheck(patterns []string) (map[string]bool, error) {
+	result := make(map[string]bool)
+
+	if len(patterns) == 0 {
+		patterns = []string{"vlc", "mpv", "firefox", "chromium", "chrome", "brave", "vivaldi", "steam"}
+	}
+
+	if os.Getenv("HYPRLAND_INSTANCE_SIGNATURE") != "" {
+		count, apps := checkHyprlandApps(patterns)
+		for _, app := range apps {
+			result[app] = true
+		}
+		if count > 0 {
+			return result, nil
+		}
+	}
+
+	if os.Getenv("NIRI_SOCKET") != "" || os.Getenv("XDG_CURRENT_DESKTOP") == "niri" {
+		count, apps := checkNiriApps(patterns)
+		for _, app := range apps {
+			result[app] = true
+		}
+		if count > 0 {
+			return result, nil
+		}
+	}
+
+	count, apps := checkProcApps(patterns)
+	for _, app := range apps {
+		result[app] = true
+	}
+	if count > 0 {
+		return result, nil
+	}
+
+	return result, nil
+}
+
+func checkHyprlandApps(patterns []string) (int, []string) {
+	cmd := exec.Command("hyprctl", "clients", "-j")
+	out, err := cmd.Output()
+	if err != nil {
+		return 0, nil
+	}
+
+	var windows []struct {
+		Class string `json:"class"`
+	}
+	if err := json.Unmarshal(out, &windows); err != nil {
+		return 0, nil
+	}
+
+	var matches []string
+	seen := make(map[string]bool)
+	for _, w := range windows {
+		if w.Class == "" {
+			continue
+		}
+		lcClass := toLower(w.Class)
+		for _, p := range patterns {
+			if stringsContains(lcClass, toLower(p)) {
+				if !seen[w.Class] {
+					seen[w.Class] = true
+					matches = append(matches, w.Class)
+				}
+				break
+			}
+		}
+	}
+
+	return len(matches), matches
+}
+
+// checkNiriApps checks app patterns against Niri windows using niri msg
+func checkNiriApps(patterns []string) (int, []string) {
+	cmd := exec.Command("niri", "msg", "windows")
+	out, err := cmd.Output()
+	if err != nil {
+		return 0, nil
+	}
+
+	text := string(out)
+	var matches []string
+	seen := make(map[string]bool)
+
+	for _, line := range strings.Split(text, "\n") {
+		if strings.HasPrefix(line, "  App ID: ") {
+			appID := strings.Trim(strings.TrimPrefix(line, "  App ID: "), `"`)
+			if appID == "" {
+				continue
+			}
+			lcAppID := toLower(appID)
+			for _, p := range patterns {
+				if stringsContains(lcAppID, toLower(p)) {
+					if !seen[appID] {
+						seen[appID] = true
+						matches = append(matches, appID)
+					}
+					break
+				}
+			}
+		}
+	}
+
+	return len(matches), matches
+}
+
+// checkProcApps checks app patterns against running processes via /proc
+func checkProcApps(patterns []string) (int, []string) {
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return 0, nil
+	}
+
+	var matches []string
+	seen := make(map[string]bool)
+
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+
+		// Check if it's a PID (numeric directory)
+		name := e.Name()
+		if len(name) > 0 && name[0] >= '0' && name[0] <= '9' {
+			// Try to read comm and exe
+			commPath := "/proc/" + name + "/comm"
+			if comm, err := os.ReadFile(commPath); err == nil {
+				commStr := strings.TrimSpace(string(comm))
+				lcComm := toLower(commStr)
+				for _, p := range patterns {
+					if stringsContains(lcComm, toLower(p)) {
+						if !seen[commStr] {
+							seen[commStr] = true
+							matches = append(matches, commStr)
+						}
+						break
+					}
+				}
+			}
+		}
+	}
+
+	return len(matches), matches
+}
+
+// Helper functions
+func toLower(s string) string {
+	var result []byte
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c >= 'A' && c <= 'Z' {
+			c += 32
+		}
+		result = append(result, c)
+	}
+	return string(result)
+}
+
+func stringsContains(haystack, needle string) bool {
+	return len(haystack) >= len(needle) &&
+		(len(needle) == 0 ||
+			strings.Contains(haystack, needle) ||
+			strings.HasPrefix(haystack, needle) ||
+			strings.HasSuffix(haystack, needle))
 }

@@ -154,6 +154,8 @@ func usage() {
 	fmt.Println("    idle-inhibitor-destroy <id> Destroy an idle inhibitor")
 	fmt.Println("    inhibit-system <0|1>    Enable or disable system-wide idle inhibition (systemd)")
 	fmt.Println("    is-system-inhibited   Check if system-wide idle inhibition is active")
+	fmt.Println("    app-inhibit-check [patterns...] Check if apps are inhibiting idle (default: vlc,mpv,firefox,chromium,brave,steam)")
+	fmt.Println("    media-inhibit-check   Check for active audio/media (PulseAudio/PipeWire)")
 	fmt.Println("    get-capabilities        Get compositor capabilities")
 	fmt.Println("    exit                    Exit compositor")
 }
@@ -682,6 +684,16 @@ func handleRPC(category string, args []string) {
 		}
 	case "System.IsSystemInhibited":
 		// No args needed
+	case "System.AppInhibitCheck":
+		if len(args) > 1 {
+			var patterns []string
+			for i := 1; i < len(args); i++ {
+				patterns = append(patterns, args[i])
+			}
+			params["patterns"] = patterns
+		}
+	case "System.MediaInhibitCheck":
+		// No args needed - checks PulseAudio/PipeWire sink-inputs
 	case "System.Exit":
 		// No args needed - exits the compositor
 	}
