@@ -121,9 +121,6 @@ AfterSync:
 	go func() {
 		for {
 			dispatchFunc := display.Context().GetDispatch()
-			// We MUST NOT hold im.wlMu while executing dispatchFunc,
-			// because handlers (like idledHandler) might try to do something,
-			// though currently they just set a boolean or close a channel.
 			if err := dispatchFunc(); err != nil {
 				return
 			}

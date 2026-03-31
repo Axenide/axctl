@@ -209,121 +209,26 @@ func runDaemon(customConfigPath string) {
 	var comp ipc.Compositor
 	var err error
 
-	runtimeDir := os.Getenv("XDG_RUNTIME_DIR")
-	if runtimeDir == "" {
-		runtimeDir = fmt.Sprintf("/run/user/%d", os.Getuid())
-		os.Setenv("XDG_RUNTIME_DIR", runtimeDir)
-	}
-
-	// Validate existing WAYLAND_DISPLAY
-	if wd := os.Getenv("WAYLAND_DISPLAY"); wd != "" {
-		if !socketExists(filepath.Join(runtimeDir, wd)) {
-			os.Unsetenv("WAYLAND_DISPLAY")
-		}
-	}
-
-	// Guess WAYLAND_DISPLAY if missing or invalid (useful for tmux)
-	if os.Getenv("WAYLAND_DISPLAY") == "" {
-		// Try to find all wayland sockets and use the one that we can actually connect to,
-		// or just pick the latest one that exists.
-		wlSock := findLatestSocket(filepath.Join(runtimeDir, "wayland-[0-9]*"))
-		if wlSock != "" && !strings.HasSuffix(wlSock, ".lock") {
-			os.Setenv("WAYLAND_DISPLAY", filepath.Base(wlSock))
-		}
-	}
-
-	// 1. Try Niri
-	niriSock := os.Getenv("NIRI_SOCKET")
-	if niriSock != "" && !socketExists(niriSock) {
-		niriSock = ""
-	}
-	if niriSock == "" {
-		niriSock = findLatestSocket(filepath.Join(runtimeDir, "niri-*.sock"))
-		if niriSock != "" {
-			os.Setenv("NIRI_SOCKET", niriSock)
-		}
-	}
-	if niriSock != "" {
-		if _, statErr := os.Stat(niriSock); statErr == nil {
-			comp, err = niri.New()
-		}
-	}
-
-	// 2. Try Hyprland
-	if comp == nil && err == nil {
-		hyprSig := os.Getenv("HYPRLAND_INSTANCE_SIGNATURE")
-		if hyprSig != "" {
-			if !socketExists(filepath.Join(runtimeDir, "hypr", hyprSig, ".socket.sock")) && !socketExists(filepath.Join("/tmp/hypr", hyprSig, ".socket.sock")) {
-				hyprSig = ""
-			}
-		}
-		if hyprSig == "" {
-			sock := findLatestSocket(filepath.Join(runtimeDir, "hypr", "*", ".socket.sock"))
-			if sock == "" {
-				sock = findLatestSocket(filepath.Join("/tmp/hypr", "*", ".socket.sock"))
-			}
-			if sock != "" {
-				hyprSig = filepath.Base(filepath.Dir(sock))
-				os.Setenv("HYPRLAND_INSTANCE_SIGNATURE", hyprSig)
-			}
-		}
-		if hyprSig != "" {
-			socketPath := filepath.Join(runtimeDir, "hypr", hyprSig, ".socket.sock")
-			if _, statErr := os.Stat(socketPath); statErr != nil {
-				socketPath = filepath.Join("/tmp/hypr", hyprSig, ".socket.sock")
-			}
-			if _, statErr := os.Stat(socketPath); statErr == nil {
-				comp, err = hyprland.New()
-			}
-		}
-	}
-
-	// 3. Try Mango fallback
-	if comp == nil && err == nil {
-		// First try the current WAYLAND_DISPLAY
-		c, e := mango.New()
-		if e == nil {
-			comp = c
-			err = nil
+	comp, err = hyprland.New()
+	if err == nil {
+		fmt.Println("Detected compositor:", comp)
+	} else {
+		comp, err = niri.New()
+		if err == nil {
+			fmt.Println("Detected compositor:", comp)
 		} else {
-			// If it failed, try other wayland sockets
-			matches, _ := filepath.Glob(filepath.Join(runtimeDir, "wayland-[0-9]*"))
-			var filtered []string
-			for _, m := range matches {
-				if !strings.HasSuffix(m, ".lock") {
-					filtered = append(filtered, m)
-				}
-			}
-
-			for _, wlSock := range filtered {
-				if filepath.Base(wlSock) == os.Getenv("WAYLAND_DISPLAY") {
-					continue // Already tried
-				}
-				os.Setenv("WAYLAND_DISPLAY", filepath.Base(wlSock))
-				c, e = mango.New()
-				if e == nil {
-					comp = c
-					err = nil
-					break
-				}
-			}
-
-			if comp == nil {
-				fmt.Printf("Debug - Mango detection failed on all sockets.\n")
+			comp, err = mango.New()
+			if err == nil {
+				fmt.Println("Detected compositor:", comp)
+			} else {
+				fmt.Println("Error: no supported compositor detected")
+				os.Exit(1)
 			}
 		}
-	}
-
-	if comp == nil {
-		if err != nil {
-			fmt.Printf("Error initializing compositor: %v\n", err)
-		} else {
-			fmt.Println("Error: no supported compositor detected")
-		}
-		os.Exit(1)
 	}
 
 	fmt.Printf("Detected compositor: %T\n", comp)
+	fmt.Println("Creating server...")
 
 	socketPath := fmt.Sprintf("/tmp/axctl-%d.sock", os.Getuid())
 
