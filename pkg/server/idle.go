@@ -502,11 +502,7 @@ func (im *IdleManager) refreshMonitor(mon *idleMonitor) error {
 	var notif *ext_idle_notify_v1.ExtIdleNotificationV1
 	var err error
 
-	hyprlandNoInhibitorSupport := os.Getenv("HYPRLAND_INSTANCE_SIGNATURE") != "" && respectInhibitors
-
-	if hyprlandNoInhibitorSupport {
-		notif, err = im.notifier.GetInputIdleNotification(timeoutMs, im.seat)
-	} else if respectInhibitors {
+	if respectInhibitors {
 		notif, err = im.notifier.GetIdleNotification(timeoutMs, im.seat)
 	} else {
 		notif, err = im.notifier.GetInputIdleNotification(timeoutMs, im.seat)
