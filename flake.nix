@@ -27,7 +27,7 @@
             subPackages = [ "." ];
             ldflags = [
               "-X"
-              "main.Version=0.0.10"
+              "main.Version=0.0.11"
             ];
             vendorHash = "sha256-4PUs37IRhUPtuXi4KU8wOUErIkVlcnaoj94zBDBsMdk=";
           };
