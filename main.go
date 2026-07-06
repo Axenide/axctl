@@ -294,7 +294,9 @@ func runDaemon(customConfigPath string) {
 	if configPath == "" {
 		configPath = config.DefaultConfigPath()
 	}
-	if _, statErr := os.Stat(configPath); statErr == nil && comp != nil {
+	if comp == nil {
+		fmt.Println("[axctl-config] Skipping compositor configuration without a supported compositor")
+	} else if _, statErr := os.Stat(configPath); statErr == nil {
 		cfg, cfgErr := config.LoadConfig(configPath)
 		if cfgErr != nil {
 			fmt.Printf("[axctl-config] Error loading config: %v\n", cfgErr)
@@ -307,8 +309,20 @@ func runDaemon(customConfigPath string) {
 				srv.SeedConfigState(cfg.ToIPCConfig())
 			}
 		}
+	} else {
+		// On a fresh home the shell writes the config only after the daemon
+		// has started. Make sure the parent directory exists so the watcher
+		// below can pick the file up the moment it appears.
+		fmt.Printf("[axctl-config] No config file at %s yet, waiting for it to appear\n", configPath)
+		if mkErr := os.MkdirAll(filepath.Dir(configPath), 0755); mkErr != nil {
+			fmt.Printf("[axctl-config] Warning: could not create config dir: %v\n", mkErr)
+		}
+	}
 
-		// Watch for config changes
+	// Watch for config changes — started even when the file doesn't exist
+	// yet, so the first config ever written is applied immediately instead
+	// of being ignored until the next session.
+	if comp != nil {
 		watcher, watchErr := config.NewConfigWatcher()
 		if watchErr != nil {
 			fmt.Printf("[axctl-config] Warning: could not start watcher: %v\n", watchErr)
@@ -324,10 +338,6 @@ func runDaemon(customConfigPath string) {
 			})
 			cfgWatcher = watcher
 		}
-	} else if comp != nil {
-		fmt.Printf("[axctl-config] No config file at %s, skipping\n", configPath)
-	} else {
-		fmt.Println("[axctl-config] Skipping compositor configuration without a supported compositor")
 	}
 
 	sig := make(chan os.Signal, 1)
