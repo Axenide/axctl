@@ -260,22 +260,30 @@ func runDaemon(customConfigPath string) {
 				fmt.Printf("[axctl-config] Error applying config: %v\n", applyErr)
 			}
 		}
-
-		// Watch for config changes
-		watcher, watchErr := config.NewConfigWatcher()
-		if watchErr != nil {
-			fmt.Printf("[axctl-config] Warning: could not start watcher: %v\n", watchErr)
-		} else {
-			watcher.Start(configPath, func(newCfg *config.TOMLConfig) {
-				fmt.Println("[axctl-config] Config changed, reloading...")
-				if applyErr := config.ApplyConfig(newCfg, comp); applyErr != nil {
-					fmt.Printf("[axctl-config] Error applying config: %v\n", applyErr)
-				}
-			})
-			cfgWatcher = watcher
-		}
 	} else {
-		fmt.Printf("[axctl-config] No config file at %s, skipping\n", configPath)
+		// On a fresh home the shell writes the config only after the daemon
+		// has started. Make sure the parent directory exists so the watcher
+		// below can pick the file up the moment it appears.
+		fmt.Printf("[axctl-config] No config file at %s yet, waiting for it to appear\n", configPath)
+		if mkErr := os.MkdirAll(filepath.Dir(configPath), 0755); mkErr != nil {
+			fmt.Printf("[axctl-config] Warning: could not create config dir: %v\n", mkErr)
+		}
+	}
+
+	// Watch for config changes — started even when the file doesn't exist
+	// yet, so the first config ever written is applied immediately instead
+	// of being ignored until the next session.
+	watcher, watchErr := config.NewConfigWatcher()
+	if watchErr != nil {
+		fmt.Printf("[axctl-config] Warning: could not start watcher: %v\n", watchErr)
+	} else {
+		watcher.Start(configPath, func(newCfg *config.TOMLConfig) {
+			fmt.Println("[axctl-config] Config changed, reloading...")
+			if applyErr := config.ApplyConfig(newCfg, comp); applyErr != nil {
+				fmt.Printf("[axctl-config] Error applying config: %v\n", applyErr)
+			}
+		})
+		cfgWatcher = watcher
 	}
 
 	sig := make(chan os.Signal, 1)
