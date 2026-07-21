@@ -67,9 +67,29 @@ func (g *LuaGenerator) GenerateAppearanceLua(config ipc.ConfigAppearance) string
 					}
 				}
 				if hasInactive {
-					colors, _ := parseColorString(*config.Border.InactiveColor)
+					colors, angle := parseColorString(*config.Border.InactiveColor)
 					if colors != "" {
-						b.WriteString(fmt.Sprintf("            inactive_border = \"%s\",\n", strings.TrimSuffix(colors, " ")))
+						if angle != "" {
+							angleNum := strings.TrimSuffix(angle, "deg")
+							colorParts := strings.Fields(colors)
+							quoted := make([]string, len(colorParts))
+
+							for i, cp := range colorParts {
+								quoted[i] = fmt.Sprintf("%q", cp)
+							}
+
+							colorList := strings.Join(quoted, ", ")
+							b.WriteString(fmt.Sprintf(
+								"            inactive_border = { colors = {%s}, angle = %s },\n",
+								colorList,
+								angleNum,
+							))
+						} else {
+							b.WriteString(fmt.Sprintf(
+								"            inactive_border = \"%s\",\n",
+								colors,
+							))
+						}
 					}
 				}
 				b.WriteString("        },\n")
