@@ -272,14 +272,32 @@ func dispatcherToLua(dispatcher, arg string) string {
 		}
 		return "hl.dsp.window.fullscreen()"
 	case "movefocus":
+		// In monocle, the spatial direction is meaningless (only one
+		// window is visible at a time). Cycle through the window stack
+		// instead: up/right = next, down/left = prev. This keeps the
+		// same SUPER+Arrow keybinds working across all layouts.
+		cycle := "cyclenext"
+		if arg == "d" || arg == "l" {
+			cycle = "cycleprev"
+		}
 		return fmt.Sprintf(
-			"function() if hl.get_active_workspace().tiled_layout == \"scrolling\" then hl.dispatch(hl.dsp.layout(%q)) else hl.dispatch(hl.dsp.focus({ direction = %q })) end end",
-			"focus "+arg, arg)
+			"function() local layout = hl.get_active_workspace().tiled_layout; if layout == \"scrolling\" then hl.dispatch(hl.dsp.layout(%q)) elseif layout == \"monocle\" then hl.dispatch(hl.dsp.layout(%q)) else hl.dispatch(hl.dsp.focus({ direction = %q })) end end",
+			"focus "+arg, cycle, arg)
 	case "movewindow":
 		if arg == "" {
 			return "hl.dsp.window.drag()"
 		}
-		return fmt.Sprintf("hl.dsp.window.move({ direction = %q })", arg)
+		// In monocle there's only one window visible at a time, so
+		// directional moves are no-ops. Keep the same keybind working
+		// by cycling focus on the user, which is what they'd expect
+		// from a "move" gesture in this layout.
+		cycle := "cyclenext"
+		if arg == "d" || arg == "l" {
+			cycle = "cycleprev"
+		}
+		return fmt.Sprintf(
+			"function() local layout = hl.get_active_workspace().tiled_layout; if layout == \"monocle\" then hl.dispatch(hl.dsp.layout(%q)) else hl.dispatch(hl.dsp.window.move({ direction = %q })) end end",
+			cycle, arg)
 	case "resizewindow":
 		if arg == "" {
 			return "hl.dsp.window.resize()"
