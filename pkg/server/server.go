@@ -8,6 +8,9 @@ import (
 	"sync"
 
 	"axctl/pkg/ipc"
+	"axctl/pkg/ipc/hyprland"
+	"axctl/pkg/ipc/mango"
+	"axctl/pkg/ipc/niri"
 )
 
 type Server struct {
@@ -58,6 +61,46 @@ func (s *Server) initCache() {
 	m, err := s.compositor.ListMonitors()
 	if err == nil {
 		s.cache.SetMonitors(m)
+	}
+}
+
+func (s *Server) listLayouts() (ipc.Layouts, error) {
+	items, err := s.compositor.ListLayouts()
+	if err != nil {
+		return ipc.Layouts{}, err
+	}
+	if items == nil {
+		items = []ipc.Layout{}
+	}
+	active := ""
+	source := ipc.LayoutSourceDynamic
+	for i, item := range items {
+		if item.Current {
+			active = item.Name
+			items[i] = item
+		}
+		if item.Source == ipc.LayoutSourceStatic {
+			source = ipc.LayoutSourceStatic
+		}
+	}
+	return ipc.Layouts{
+		Items:      items,
+		Active:     active,
+		Compositor: s.compositorName(),
+		Source:     source,
+	}, nil
+}
+
+func (s *Server) compositorName() string {
+	switch s.compositor.(type) {
+	case *hyprland.Hyprland:
+		return "hyprland"
+	case *niri.Niri:
+		return "niri"
+	case *mango.Mango:
+		return "mango"
+	default:
+		return "unknown"
 	}
 }
 
@@ -582,6 +625,8 @@ func (s *Server) handleConnection(conn net.Conn) {
 				break
 			}
 			err = s.compositor.Execute(p.Command)
+		case "System.ListLayouts":
+			result, err = s.listLayouts()
 		case "System.GetCursorPosition":
 			var x, y int
 			x, y, err = s.compositor.GetCursorPosition()

@@ -639,6 +639,76 @@ func TestSetLayoutPayload(t *testing.T) {
 	}
 }
 
+func TestListLayoutsActiveFromMonitor(t *testing.T) {
+	s := newFakeServer(t, func(t *testing.T, parts []string) (string, bool, bool, string) {
+		if len(parts) == 2 && parts[0] == "get" && parts[1] == "all-monitors" {
+			return `{"monitors":[{"name":"DP-1","active":true,"layout_symbol":"scroller"},{"name":"HDMI-A-1","active":false,"layout_symbol":"tile"}]}`, false, true, ""
+		}
+		return "", true, false, "unexpected"
+	})
+	m := s.Client(t)
+	layouts, err := m.ListLayouts()
+	if err != nil {
+		t.Fatalf("ListLayouts error = %v", err)
+	}
+	if len(layouts) != len(mangoKnownLayouts) {
+		t.Fatalf("layouts = %d, want %d", len(layouts), len(mangoKnownLayouts))
+	}
+	var current int
+	for _, l := range layouts {
+		if l.Current {
+			current++
+			if l.Name != "scroller" {
+				t.Fatalf("current = %q, want scroller", l.Name)
+			}
+		}
+		if l.Source != ipc.LayoutSourceStatic {
+			t.Fatalf("source = %q, want static", l.Source)
+		}
+	}
+	if current != 1 {
+		t.Fatalf("current count = %d, want 1", current)
+	}
+}
+
+func TestListLayoutsWithoutActiveMonitor(t *testing.T) {
+	s := newFakeServer(t, func(t *testing.T, parts []string) (string, bool, bool, string) {
+		if len(parts) == 2 && parts[0] == "get" && parts[1] == "all-monitors" {
+			return `{"monitors":[]}`, false, true, ""
+		}
+		return "", true, false, "unexpected"
+	})
+	m := s.Client(t)
+	layouts, err := m.ListLayouts()
+	if err != nil {
+		t.Fatalf("ListLayouts error = %v", err)
+	}
+	for _, l := range layouts {
+		if l.Current {
+			t.Fatalf("expected no current layout, got %+v", l)
+		}
+	}
+}
+
+func TestListLayoutsMonitorErrorFallsBackToNoneCurrent(t *testing.T) {
+	s := newFakeServer(t, func(t *testing.T, parts []string) (string, bool, bool, string) {
+		return "", true, false, "no such request"
+	})
+	m := s.Client(t)
+	layouts, err := m.ListLayouts()
+	if err != nil {
+		t.Fatalf("ListLayouts error = %v", err)
+	}
+	if len(layouts) != len(mangoKnownLayouts) {
+		t.Fatalf("layouts = %d, want %d", len(layouts), len(mangoKnownLayouts))
+	}
+	for _, l := range layouts {
+		if l.Current {
+			t.Fatalf("expected no current layout, got %+v", l)
+		}
+	}
+}
+
 func TestExecutePayload(t *testing.T) {
 	s := newFakeServer(t, func(t *testing.T, parts []string) (string, bool, bool, string) {
 		return "", true, true, ""

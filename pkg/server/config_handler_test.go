@@ -1,10 +1,13 @@
 package server
 
 import (
+	"encoding/json"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"axctl/pkg/ipc"
 	"axctl/pkg/ipc/hyprland"
@@ -183,6 +186,64 @@ func TestMangoClientImplementsLoadConfig(t *testing.T) {
 	}
 	if _, ok := c.(loader); !ok {
 		t.Fatal("Mango must implement LoadConfig for the generated config path to be applied")
+	}
+}
+
+func TestServerListLayoutsHandler(t *testing.T) {
+	mockComp := mock.NewCompositor()
+	mockComp.SetLayouts([]ipc.Layout{
+		{Name: "dwindle"},
+		{Name: "master", Current: true},
+		{Name: "scroller"},
+	})
+	socketPath := filepath.Join(t.TempDir(), "daemon.sock")
+	srv := New(mockComp, socketPath)
+
+	serverErr := make(chan error, 1)
+	go func() { serverErr <- srv.Start() }()
+	defer func() {
+		_ = os.Remove(socketPath)
+	}()
+
+	var conn net.Conn
+	var dialErr error
+	deadline := time.Now().Add(time.Second)
+	for {
+		conn, dialErr = net.DialTimeout("unix", socketPath, 100*time.Millisecond)
+		if dialErr == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("dial: %v", dialErr)
+		}
+	}
+	defer conn.Close()
+
+	req := map[string]interface{}{"id": 1, "method": "System.ListLayouts", "params": map[string]interface{}{}}
+	if err := json.NewEncoder(conn).Encode(req); err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	var resp struct {
+		Result ipc.Layouts `json:"result"`
+		Error  string      `json:"error"`
+	}
+	if err := json.NewDecoder(conn).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Error != "" {
+		t.Fatalf("error: %s", resp.Error)
+	}
+	if len(resp.Result.Items) != 3 {
+		t.Fatalf("items = %+v", resp.Result.Items)
+	}
+	if resp.Result.Active != "master" {
+		t.Fatalf("active = %q, want master", resp.Result.Active)
+	}
+	if resp.Result.Source != ipc.LayoutSourceDynamic {
+		t.Fatalf("source = %q, want dynamic", resp.Result.Source)
+	}
+	if resp.Result.Compositor != "unknown" {
+		t.Fatalf("compositor = %q, want unknown", resp.Result.Compositor)
 	}
 }
 

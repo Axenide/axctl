@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 	"sync"
@@ -569,6 +570,137 @@ func (h *Hyprland) SetDpms(monitorID string, on bool) error {
 func (h *Hyprland) SetLayout(name string) error {
 	_, err := h.dispatch(fmt.Sprintf("keyword general:layout %s", name))
 	return err
+}
+
+func (h *Hyprland) ListLayouts() ([]ipc.Layout, error) {
+	items, source, err := h.fetchLayouts()
+	if err != nil {
+		return nil, err
+	}
+	current, _ := h.fetchActiveLayout()
+	for i := range items {
+		if items[i].Name == current {
+			items[i].Current = true
+		}
+		items[i].Source = source
+	}
+	return items, nil
+}
+
+func (h *Hyprland) fetchLayouts() ([]ipc.Layout, ipc.LayoutSource, error) {
+	if resp, err := h.dispatch("j/layouts"); err == nil {
+		trimmed := strings.TrimSpace(resp)
+		if strings.HasPrefix(trimmed, "[") {
+			var names []string
+			if err := json.Unmarshal([]byte(trimmed), &names); err == nil {
+				return namesToLayouts(names), ipc.LayoutSourceDynamic, nil
+			}
+		}
+	}
+	if resp, err := h.dispatch("layouts"); err == nil && strings.TrimSpace(resp) != "" && !strings.HasPrefix(strings.TrimSpace(resp), "unknown") {
+		return parseHyprctlLayoutsList(resp), ipc.LayoutSourceDynamic, nil
+	}
+	if names, err := hyprctlSubprocessLayouts(); err == nil && len(names) > 0 {
+		return namesToLayouts(names), ipc.LayoutSourceDynamic, nil
+	}
+	return namesToLayouts(hyprlandBuiltInLayouts), ipc.LayoutSourceStatic, nil
+}
+
+func hyprctlSubprocessLayouts() ([]string, error) {
+	for _, arg := range []string{"-j", "layouts"} {
+		out, err := exec.Command("hyprctl", arg).Output()
+		if err != nil {
+			continue
+		}
+		text := strings.TrimSpace(string(out))
+		if text == "" || strings.HasPrefix(text, "unknown") {
+			continue
+		}
+		if strings.HasPrefix(text, "[") {
+			var names []string
+			if jerr := json.Unmarshal(out, &names); jerr == nil {
+				return names, nil
+			}
+		}
+		return parseHyprctlLayoutsText(text), nil
+	}
+	return nil, fmt.Errorf("hyprctl unavailable")
+}
+
+func parseHyprctlLayoutsText(text string) []string {
+	seen := map[string]struct{}{}
+	var out []string
+	for _, line := range strings.Split(text, "\n") {
+		name := strings.TrimSpace(line)
+		if name == "" {
+			continue
+		}
+		if idx := strings.Index(name, " "); idx > 0 {
+			name = name[:idx]
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		out = append(out, name)
+	}
+	return out
+}
+
+var hyprlandBuiltInLayouts = []string{"dwindle", "master", "scrolling", "monocle"}
+
+func (h *Hyprland) fetchActiveLayout() (string, error) {
+	resp, err := h.dispatch("j/getoption general:layout")
+	if err != nil {
+		return "", err
+	}
+	var payload struct {
+		Str string `json:"str"`
+	}
+	if err := json.Unmarshal([]byte(resp), &payload); err == nil {
+		return payload.Str, nil
+	}
+	var anyVal interface{}
+	if err := json.Unmarshal([]byte(resp), &anyVal); err == nil {
+		if m, ok := anyVal.(map[string]interface{}); ok {
+			if v, ok := m["str"].(string); ok {
+				return v, nil
+			}
+		}
+	}
+	return "", nil
+}
+
+func namesToLayouts(names []string) []ipc.Layout {
+	out := make([]ipc.Layout, 0, len(names))
+	for _, n := range names {
+		n = strings.TrimSpace(n)
+		if n == "" {
+			continue
+		}
+		out = append(out, ipc.Layout{Name: n})
+	}
+	return out
+}
+
+func parseHyprctlLayoutsList(resp string) []ipc.Layout {
+	seen := map[string]struct{}{}
+	var out []ipc.Layout
+	for _, line := range strings.Split(resp, "\n") {
+		name := strings.TrimSpace(line)
+		if name == "" {
+			continue
+		}
+		if idx := strings.Index(name, " "); idx > 0 {
+			name = name[:idx]
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		out = append(out, ipc.Layout{Name: name})
+	}
+	return out
 }
 
 func (h *Hyprland) MoveWindowPixel(id string, x, y int) error {

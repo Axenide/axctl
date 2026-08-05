@@ -42,6 +42,29 @@ type Capabilities struct {
 	WindowsSupported    bool `json:"windows_supported"`
 }
 
+// LayoutSource describes how a layout list was obtained.
+type LayoutSource string
+
+const (
+	LayoutSourceDynamic LayoutSource = "dynamic"
+	LayoutSourceStatic  LayoutSource = "static"
+)
+
+// Layout represents a single available window layout in the compositor.
+type Layout struct {
+	Name    string       `json:"name"`
+	Current bool         `json:"current,omitempty"`
+	Source  LayoutSource `json:"source,omitempty"`
+}
+
+// Layouts is the response payload for ListLayouts.
+type Layouts struct {
+	Items      []Layout     `json:"items"`
+	Active     string       `json:"active,omitempty"`
+	Compositor string       `json:"compositor"`
+	Source     LayoutSource `json:"source"`
+}
+
 // EventType represents the type of event occurring in the compositor.
 type EventType string
 

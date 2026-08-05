@@ -482,6 +482,67 @@ func (m *Mango) SetLayout(name string) error {
 	return conn.Dispatch("setlayout " + name)
 }
 
+// mangoKnownLayouts lists built-in Mango layouts recognized by setlayout /
+// switch_layout (src/layout/layout.h). Used as fallback when the live list
+// cannot be obtained through mmsg.
+var mangoKnownLayouts = []string{
+	"tile",
+	"scroller",
+	"grid",
+	"monocle",
+	"deck",
+	"center_tile",
+	"right_tile",
+	"vertical_scroller",
+	"vertical_tile",
+	"vertical_grid",
+	"vertical_deck",
+	"dwindle",
+	"fair",
+	"vertical_fair",
+}
+
+func (m *Mango) ListLayouts() ([]ipc.Layout, error) {
+	active := mangoActiveLayout(m)
+	out := make([]ipc.Layout, 0, len(mangoKnownLayouts))
+	for _, name := range mangoKnownLayouts {
+		out = append(out, ipc.Layout{
+			Name:    name,
+			Current: name == active,
+			Source:  ipc.LayoutSourceStatic,
+		})
+	}
+	return out, nil
+}
+
+func mangoActiveLayout(m *Mango) string {
+	conn, err := m.acquire()
+	if err != nil {
+		return ""
+	}
+	monitors := struct {
+		Monitors []struct {
+			Name         string `json:"name"`
+			Active       bool   `json:"active"`
+			LayoutSymbol string `json:"layout_symbol"`
+		} `json:"monitors"`
+	}{}
+	if err := conn.Query("get all-monitors", &monitors); err != nil {
+		return ""
+	}
+	for _, mon := range monitors.Monitors {
+		if mon.Active && mon.LayoutSymbol != "" {
+			return mon.LayoutSymbol
+		}
+	}
+	for _, mon := range monitors.Monitors {
+		if mon.LayoutSymbol != "" {
+			return mon.LayoutSymbol
+		}
+	}
+	return ""
+}
+
 func (m *Mango) GetConfig(key string) (interface{}, error) {
 	return nil, ipc.ErrNotSupported
 }

@@ -23,6 +23,9 @@ type Compositor struct {
 	subscribeErr       error
 	reloadConfigErr    error
 	loadConfigErr      error
+	listLayoutsErr     error
+
+	layouts []ipc.Layout
 
 	calls struct {
 		listWindows     int
@@ -33,6 +36,7 @@ type Compositor struct {
 		subscribe       int
 		reloadConfig    int
 		loadConfig      []string
+		listLayouts     int
 	}
 
 	subscribed bool
@@ -57,6 +61,7 @@ func NewCompositor() *Compositor {
 			subscribe       int
 			reloadConfig    int
 			loadConfig      []string
+			listLayouts     int
 		}{
 			focusWindow:     []string{},
 			closeWindow:     []string{},
@@ -260,6 +265,21 @@ func (c *Compositor) SetLayout(name string) error {
 	return nil
 }
 
+func (c *Compositor) ListLayouts() ([]ipc.Layout, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.calls.listLayouts++
+	if c.listLayoutsErr != nil {
+		return nil, c.listLayoutsErr
+	}
+	if c.layouts == nil {
+		return nil, nil
+	}
+	out := make([]ipc.Layout, len(c.layouts))
+	copy(out, c.layouts)
+	return out, nil
+}
+
 func (c *Compositor) GetConfig(key string) (interface{}, error) {
 	return nil, nil
 }
@@ -408,6 +428,24 @@ func (c *Compositor) SetSubscribeError(err error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.subscribeErr = err
+}
+
+func (c *Compositor) SetListLayoutsError(err error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.listLayoutsErr = err
+}
+
+func (c *Compositor) SetLayouts(layouts []ipc.Layout) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.layouts = layouts
+}
+
+func (c *Compositor) ListLayoutsCalls() int {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.calls.listLayouts
 }
 
 func (c *Compositor) EmitEvent(evt ipc.Event) {

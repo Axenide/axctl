@@ -859,3 +859,19 @@ func TestSocketPathRespectsAbsolute(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 }
+
+func TestListLayoutsStatic(t *testing.T) {
+	dir := t.TempDir()
+	socket := filepath.Join(dir, "niri.sock")
+	c := &Niri{socketPath: socket}
+	layouts, err := c.ListLayouts()
+	if err != nil {
+		t.Fatalf("ListLayouts() error = %v", err)
+	}
+	if len(layouts) != 1 || layouts[0].Name != "scrolling" || !layouts[0].Current {
+		t.Fatalf("layouts = %+v, want only scrolling current", layouts)
+	}
+	if layouts[0].Source != ipc.LayoutSourceStatic {
+		t.Fatalf("source = %q, want static", layouts[0].Source)
+	}
+}

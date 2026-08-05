@@ -34,6 +34,7 @@ type Compositor interface {
 	SetDpms(monitorID string, on bool) error
 
 	SetLayout(name string) error
+	ListLayouts() ([]Layout, error)
 
 	GetConfig(key string) (interface{}, error)
 	SetConfig(key string, value interface{}) error

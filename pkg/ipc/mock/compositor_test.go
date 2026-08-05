@@ -7,6 +7,36 @@ import (
 	"axctl/pkg/ipc"
 )
 
+func TestListLayouts(t *testing.T) {
+	m := NewCompositor()
+	m.SetLayouts([]ipc.Layout{
+		{Name: "dwindle"},
+		{Name: "master", Current: true},
+	})
+	layouts, err := m.ListLayouts()
+	if err != nil {
+		t.Fatalf("ListLayouts() error = %v", err)
+	}
+	if len(layouts) != 2 {
+		t.Fatalf("layouts = %+v", layouts)
+	}
+	if !layouts[1].Current {
+		t.Fatalf("current layout = %+v", layouts[1])
+	}
+	if m.ListLayoutsCalls() != 1 {
+		t.Fatalf("calls = %d, want 1", m.ListLayoutsCalls())
+	}
+}
+
+func TestListLayoutsError(t *testing.T) {
+	m := NewCompositor()
+	m.SetListLayoutsError(ipc.ErrCompositorNotAvailable)
+	_, err := m.ListLayouts()
+	if err != ipc.ErrCompositorNotAvailable {
+		t.Fatalf("err = %v, want ErrCompositorNotAvailable", err)
+	}
+}
+
 func TestNewCompositor(t *testing.T) {
 	m := NewCompositor()
 

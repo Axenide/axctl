@@ -134,6 +134,7 @@ func usage() {
 	fmt.Println("\n  system <action> [args]")
 	fmt.Println("    execute <cmd>           Execute command")
 	fmt.Println("    get-cursor-position     Get absolute cursor position")
+	fmt.Println("    list-layouts            List available window layouts (compositor introspection + static fallback)")
 	fmt.Println("    switch-keyboard-layout [next|prev] Switch keyboard layout")
 	fmt.Println("    set-keyboard-layouts <layouts> [variants] Set keyboard layouts (e.g. \"us,es\" \"altgr-intl,\")")
 	fmt.Println("    idle-inhibit <0|1>      Inhibit or allow idle/sleep")
@@ -599,6 +600,8 @@ func handleRPC(category string, args []string) {
 		}
 	case "System.MediaInhibitCheck":
 		// No args needed - checks PulseAudio/PipeWire sink-inputs
+	case "System.ListLayouts":
+		// No args needed
 	case "System.Exit":
 		// No args needed - exits the compositor
 	}

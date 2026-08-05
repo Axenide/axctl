@@ -639,6 +639,12 @@ func (n *Niri) SetLayout(name string) error {
 	return ipc.ErrNotSupported
 }
 
+func (n *Niri) ListLayouts() ([]ipc.Layout, error) {
+	return []ipc.Layout{
+		{Name: "scrolling", Current: true, Source: ipc.LayoutSourceStatic},
+	}, nil
+}
+
 func (n *Niri) SetConfig(key string, value interface{}) error {
 	switch key {
 	case "border.active_color", "border.inactive_color":

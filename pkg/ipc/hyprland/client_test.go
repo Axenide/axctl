@@ -7,6 +7,8 @@ import (
 	"reflect"
 	"sync"
 	"testing"
+
+	"axctl/pkg/ipc"
 )
 
 func TestParseHyprlandVersion(t *testing.T) {
@@ -143,7 +145,91 @@ func TestHyprlandLuaDispatcherCommands(t *testing.T) {
 	}
 }
 
+func TestListLayoutsParsesJson(t *testing.T) {
+	responses := map[string]string{
+		"j/layouts":                  `["dwindle","master","scrolling","monocle"]`,
+		"j/getoption general:layout": `{"str":"master"}`,
+	}
+	getCommands := runFakeHyprlandSocketWith(t, nil, responses)
+	h := &Hyprland{signature: "test"}
+	layouts, err := h.ListLayouts()
+	if err != nil {
+		t.Fatalf("ListLayouts() error = %v", err)
+	}
+	want := []ipc.Layout{
+		{Name: "dwindle", Source: ipc.LayoutSourceDynamic},
+		{Name: "master", Current: true, Source: ipc.LayoutSourceDynamic},
+		{Name: "scrolling", Source: ipc.LayoutSourceDynamic},
+		{Name: "monocle", Source: ipc.LayoutSourceDynamic},
+	}
+	if !reflect.DeepEqual(layouts, want) {
+		t.Fatalf("layouts = %+v, want %+v", layouts, want)
+	}
+	cmds := getCommands()
+	if len(cmds) < 2 || cmds[0] != "j/layouts" {
+		t.Fatalf("commands = %+v, want j/layouts first", cmds)
+	}
+}
+
+func TestListLayoutsParsesTextFallback(t *testing.T) {
+	responses := map[string]string{
+		"j/layouts":                  "unknown request",
+		"j/getoption general:layout": `{"str":"dwindle"}`,
+		"layouts":                    "dwindle\nmaster\nscrolling\nmonocle\n",
+	}
+	runFakeHyprlandSocketWith(t, nil, responses)
+	h := &Hyprland{signature: "test"}
+	layouts, err := h.ListLayouts()
+	if err != nil {
+		t.Fatalf("ListLayouts() error = %v", err)
+	}
+	if len(layouts) != 4 {
+		t.Fatalf("layouts = %+v, want 4", layouts)
+	}
+	if layouts[0].Name != "dwindle" || !layouts[0].Current {
+		t.Fatalf("layouts[0] = %+v, want dwindle current", layouts[0])
+	}
+}
+
+func TestListLayoutsStaticFallbackWhenHyprctlUnknown(t *testing.T) {
+	runFakeHyprlandSocketWith(t, nil, map[string]string{
+		"j/layouts":                  "unknown request",
+		"j/getoption general:layout": `{"str":"master"}`,
+		"layouts":                    "unknown request",
+	})
+	t.Setenv("PATH", t.TempDir())
+	h := &Hyprland{signature: "test"}
+	layouts, err := h.ListLayouts()
+	if err != nil {
+		t.Fatalf("ListLayouts() error = %v", err)
+	}
+	if len(layouts) != 4 {
+		t.Fatalf("layouts = %+v, want 4 built-in", layouts)
+	}
+	if layouts[1].Name != "master" || !layouts[1].Current {
+		t.Fatalf("layouts[1] = %+v, want master current", layouts[1])
+	}
+	for _, l := range layouts {
+		if l.Source != ipc.LayoutSourceStatic {
+			t.Fatalf("layout %+v, want static source", l)
+		}
+	}
+}
+
+func TestParseHyprctlLayoutsList(t *testing.T) {
+	resp := "dwindle some description\nmaster extra info\nscrolling\n"
+	got := parseHyprctlLayoutsList(resp)
+	want := []ipc.Layout{{Name: "dwindle"}, {Name: "master"}, {Name: "scrolling"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("parseHyprctlLayoutsList = %+v, want %+v", got, want)
+	}
+}
+
 func runFakeHyprlandSocket(t *testing.T, versions []string) func() []string {
+	return runFakeHyprlandSocketWith(t, versions, map[string]string{})
+}
+
+func runFakeHyprlandSocketWith(t *testing.T, versions []string, responses map[string]string) func() []string {
 	t.Helper()
 
 	runtimeDir := t.TempDir()
@@ -188,7 +274,14 @@ func runFakeHyprlandSocket(t *testing.T, versions []string) func() []string {
 						version = versions[versionIndex]
 					}
 					versionIndex++
+					if version == "" {
+						version = "{\"version\":\"0.55.0\"}"
+					}
 					_, _ = conn.Write([]byte(version))
+					return
+				}
+				if resp, ok := responses[cmd]; ok {
+					_, _ = conn.Write([]byte(resp))
 					return
 				}
 				_, _ = conn.Write([]byte("ok"))
