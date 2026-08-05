@@ -62,6 +62,20 @@ func TestGenerateAppearanceAnimationsOff(t *testing.T) {
 	}
 }
 
+// TestGenerateAppearanceAnimationsOn omits the animations block when
+// enabled — Niri has no `enabled` key inside `animations {}`, and the
+// default state is already enabled, so emitting nothing keeps the file
+// parseable.
+func TestGenerateAppearanceAnimationsOn(t *testing.T) {
+	g := &Generator{}
+	out := g.GenerateAppearance(ipc.ConfigAppearance{
+		Animations: &ipc.Animations{Enabled: boolPtr(true)},
+	})
+	if strings.Contains(out, "animations {") {
+		t.Fatalf("animations block must be omitted when enabled, got: %s", out)
+	}
+}
+
 func TestGenerateKeybindsSuperMapsToMod(t *testing.T) {
 	g := &Generator{}
 	out := g.GenerateKeybinds(ipc.ConfigKeybinds{
@@ -165,3 +179,86 @@ func TestGenerateStartupSpawnAtStartup(t *testing.T) {
 }
 
 func floatPtr(v float64) *float64 { return &v }
+
+// TestNiriMapKeyMouseButtons checks the Hyprland mouse:N → Niri MouseXxx
+// translation. Without this the emitted KDL is "mouse:272" which is an
+// invalid identifier and breaks `niri validate`.
+func TestNiriMapKeyMouseButtons(t *testing.T) {
+	cases := map[string]string{
+		"mouse:272": "MouseLeft",
+		"mouse:273": "MouseRight",
+		"mouse:274": "MouseMiddle",
+		"mouse:275": "MouseForward",
+		"mouse:276": "MouseBack",
+	}
+	for in, want := range cases {
+		got, ok := niriMapKey(in)
+		if !ok || got != want {
+			t.Errorf("niriMapKey(%q) = (%q, %v), want (%q, true)", in, got, ok, want)
+		}
+	}
+}
+
+// TestNiriMapKeyLidSwitchSkipped ensures lid switch events aren't emitted
+// at all — Niri has no equivalent, and "switch:Lid Switch" is invalid KDL.
+func TestNiriMapKeyLidSwitchSkipped(t *testing.T) {
+	for _, in := range []string{"switch:Lid Switch", "switch:on:Lid Switch", "switch:off:Lid Switch"} {
+		if _, ok := niriMapKey(in); ok {
+			t.Errorf("niriMapKey(%q) should be skipped, but was kept", in)
+		}
+	}
+}
+
+// TestNiriMapKeyXF86Passthrough covers keys that Niri accepts verbatim.
+func TestNiriMapKeyXF86Passthrough(t *testing.T) {
+	for _, in := range []string{"XF86AudioLowerVolume", "XF86AudioRaiseVolume", "F1", "Escape"} {
+		got, ok := niriMapKey(in)
+		if !ok || got != in {
+			t.Errorf("niriMapKey(%q) = (%q, %v), want (%q, true)", in, got, ok, in)
+		}
+	}
+}
+
+// TestNiriParseColorRGBWrapper covers the Hyprland rgb()/rgba() format
+// that ambxst writes into the TOML. Niri rejects "rgb(87abf8)" as invalid
+// hex, so the wrapper must be unwrapped here.
+func TestNiriParseColorRGBWrapper(t *testing.T) {
+	cases := map[string]string{
+		"rgb(87abf8)":      "#87abf8ff",
+		"rgba(87abf880)":   "#87abf880",
+		"rgb(272937)":      "#272937ff",
+		"#abcdef":          "#abcdefff",
+		"#abcdef80":        "#abcdef80",
+		"":                 "",
+	}
+	for in, want := range cases {
+		if got := niriParseColor(in); got != want {
+			t.Errorf("niriParseColor(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+// a lid switch keybind into GenerateKeybinds must not produce any "switch:"
+// a lid switch keybind into GenerateKeybinds must not produce a bind block
+// for it. The skipped bind is reported in a comment so the user can wire
+// it up by hand if they want.
+func TestKeybindsSkipsUnsupportedLidSwitch(t *testing.T) {
+	g := &Generator{}
+	out := g.GenerateKeybinds(ipc.ConfigKeybinds{
+		Custom: []ipc.Keybind{{
+			Key:        "switch:Lid Switch",
+			Enabled:    true,
+			Dispatcher: "exec",
+			Argument:   "true",
+		}},
+	})
+	// No "    switch:" indent in the binds block — only the skipped-comment
+	// line may mention it.
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, "    switch:") {
+			t.Errorf("lid switch leaked into binds block: %q", line)
+		}
+	}
+	if !strings.Contains(out, "// Skipped binds") {
+		t.Errorf("expected skipped binds comment, got: %s", out)
+	}
+}
