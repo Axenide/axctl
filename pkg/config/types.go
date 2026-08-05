@@ -5,6 +5,7 @@ import "axctl/pkg/ipc"
 // TOMLConfig is the top-level configuration structure parsed from TOML files.
 type TOMLConfig struct {
 	Include     []string           `toml:"include,omitempty"`
+	Target      *TargetConfig      `toml:"target,omitempty"`
 	Appearance  *AppearanceConfig  `toml:"appearance,omitempty"`
 	General     *GeneralConfig     `toml:"general,omitempty"`
 	Input       *InputConfig       `toml:"input,omitempty"`
@@ -14,6 +15,17 @@ type TOMLConfig struct {
 	Startup     *StartupConfig     `toml:"startup,omitempty"`
 	Exec        interface{}        `toml:"exec,omitempty"`
 	ExecOnce    interface{}        `toml:"exec-once,omitempty"`
+}
+
+// TargetConfig declares where the generated compositor configuration files
+// should be written. Each field is optional; unset fields fall back to the
+// compositor's default output paths. Paths starting with "~/" or "~" are
+// expanded against $HOME; relative paths are resolved against the directory
+// of the TOML file that defined the [target] section.
+type TargetConfig struct {
+	Hyprland string `toml:"hyprland,omitempty"`
+	Niri     string `toml:"niri,omitempty"`
+	Mango    string `toml:"mango,omitempty"`
 }
 
 type StartupConfig struct {

@@ -19,10 +19,10 @@ type ConfigHandler struct {
 }
 
 func NewConfigHandler(c ipc.Compositor) *ConfigHandler {
-	return NewConfigHandlerWithOutput(c, "")
+	return NewConfigHandlerWithOutput(c, "", "")
 }
 
-func NewConfigHandlerWithOutput(c ipc.Compositor, outputPath string) *ConfigHandler {
+func NewConfigHandlerWithOutput(c ipc.Compositor, primaryPath, altPath string) *ConfigHandler {
 	var gen ipc.ConfigGenerator
 	var lg ipc.LuaConfigGenerator
 	switch c.(type) {
@@ -38,8 +38,8 @@ func NewConfigHandlerWithOutput(c ipc.Compositor, outputPath string) *ConfigHand
 	}
 
 	paths := PathsForCompositor(c)
-	if outputPath != "" {
-		paths = configPaths{primary: outputPath}
+	if primaryPath != "" || altPath != "" {
+		paths = configPaths{primary: primaryPath, alt: altPath}
 	}
 
 	return &ConfigHandler{compositor: c, generator: gen, luaGen: lg, paths: paths}

@@ -662,6 +662,9 @@ func (s *Server) handleConnection(conn net.Conn) {
 				resp.Error = fmt.Sprintf("invalid json payload: %v", err)
 				break
 			}
+			// Config.Apply is invoked via JSON-RPC and does not carry a
+			// [target] section, so fall back to the compositor's default
+			// output paths.
 			handler := NewConfigHandler(s.compositor)
 			err = handler.ApplyConfig(payload)
 

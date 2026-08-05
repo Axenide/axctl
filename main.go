@@ -260,7 +260,8 @@ func runDaemon(customConfigPath string) {
 			fmt.Printf("[axctl-config] Error loading config: %v\n", cfgErr)
 		} else {
 			fmt.Printf("[axctl-config] Loaded config from %s\n", configPath)
-			if applyErr := config.ApplyConfig(cfg, comp); applyErr != nil {
+			configDir := filepath.Dir(configPath)
+			if applyErr := config.ApplyConfig(cfg, comp, configDir); applyErr != nil {
 				fmt.Printf("[axctl-config] Error applying config: %v\n", applyErr)
 			}
 		}
@@ -270,9 +271,10 @@ func runDaemon(customConfigPath string) {
 		if watchErr != nil {
 			fmt.Printf("[axctl-config] Warning: could not start watcher: %v\n", watchErr)
 		} else {
+			configDir := filepath.Dir(configPath)
 			watcher.Start(configPath, func(newCfg *config.TOMLConfig) {
 				fmt.Println("[axctl-config] Config changed, reloading...")
-				if applyErr := config.ApplyConfig(newCfg, comp); applyErr != nil {
+				if applyErr := config.ApplyConfig(newCfg, comp, configDir); applyErr != nil {
 					fmt.Printf("[axctl-config] Error applying config: %v\n", applyErr)
 				}
 			})

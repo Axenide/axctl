@@ -12,6 +12,28 @@
 #     "rules/*.toml",
 # ]
 
+# ─── Target ───────────────────────────────────────────────────────────
+# Declares where the generated compositor configuration files should be
+# written. Each field is optional; unset fields keep the compositor's
+# default output paths. Useful when integrating with shell tooling that
+# expects the generated file at a specific location (e.g. ambxst's
+# `install hyprland` block expects the Lua config under
+# ~/.local/share/ambxst/hyprland.lua).
+#
+# Path resolution:
+#   "~" or "~/..."   expands against $HOME
+#   "/absolute/..."  used as-is
+#   "relative/path"  resolved against the directory of this TOML file
+#
+# For Hyprland, the format (.lua vs .conf) is inferred from the
+# extension. If the path has no extension, both "<name>.conf" and
+# "<name>.lua" siblings are written.
+
+# [target]
+# hyprland = "~/.local/share/ambxst/hyprland.lua"
+# niri     = "~/.local/share/ambxst/niri.kdl"
+# mango    = "~/.local/share/ambxst/mango.conf"
+
 # ─── Appearance ───────────────────────────────────────────────────────
 
 [appearance]
