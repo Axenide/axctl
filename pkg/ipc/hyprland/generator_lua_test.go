@@ -3,6 +3,8 @@ package hyprland
 import (
 	"strings"
 	"testing"
+
+	"axctl/pkg/ipc"
 )
 
 func TestDispatcherToLuaMovefocusMonocle(t *testing.T) {
@@ -95,5 +97,31 @@ func TestDispatcherToLuaMovewindowDragUnchanged(t *testing.T) {
 	want := "hl.dsp.window.drag()"
 	if lua != want {
 		t.Errorf("drag variant regressed: got %q, want %q", lua, want)
+	}
+}
+
+// Each Lua section generator should be banner-free. The orchestrator in
+// pkg/server writes the banner exactly once at the top of the file.
+func TestLuaSectionsAreBannerFree(t *testing.T) {
+	gen := NewLuaGenerator()
+	banner := "-- ▄    ▄▄▄  ▄▄ ▄▄  ▄▄▄▄ ▄▄▄▄▄▄ ▄▄"
+
+	sections := []string{
+		gen.GenerateAppearanceLua(ipc.ConfigAppearance{}),
+		gen.GenerateKeybindsLua(ipc.ConfigKeybinds{}),
+		gen.GenerateWindowRulesLua(nil),
+		gen.GenerateLayerRulesLua(nil),
+	}
+	for _, sec := range sections {
+		if strings.Contains(sec, banner) {
+			t.Errorf("section generator leaked the banner; section:\n%s", sec)
+		}
+	}
+
+	if got := gen.GenerateStartupLua([]string{"notify-send hi"}, []string{"ambxst"}); strings.Contains(got, banner) {
+		t.Errorf("GenerateStartupLua leaked the banner:\n%s", got)
+	}
+	if got := gen.GenerateStartupLua(nil, nil); strings.Contains(got, banner) {
+		t.Errorf("empty GenerateStartupLua leaked the banner:\n%s", got)
 	}
 }

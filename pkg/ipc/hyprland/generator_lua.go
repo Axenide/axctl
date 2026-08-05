@@ -23,10 +23,6 @@ func luaBool(v bool) string {
 func (g *LuaGenerator) GenerateAppearanceLua(config ipc.ConfigAppearance) string {
 	var b strings.Builder
 
-	b.WriteString("-- ▄    ▄▄▄  ▄▄ ▄▄  ▄▄▄▄ ▄▄▄▄▄▄ ▄▄    \n")
-	b.WriteString("--  ▀▄ ██▀██ ▀█▄█▀ ██▀▀▀   ██   ██    \n")
-	b.WriteString("-- ▄▀  ██▀██ ██ ██ ▀████   ██   ██▄▄▄ \n\n")
-
 	needsGeneral := (config.Gaps != nil) || (config.Border != nil) || (config.Layout != nil && *config.Layout != "")
 	needsDecoration := (config.Border != nil && config.Border.Rounding != nil) || (config.Opacity != nil) || (config.Shadow != nil) || (config.Blur != nil)
 
@@ -460,9 +456,6 @@ func (g *LuaGenerator) GenerateStartupLua(exec []string, execOnce []string) stri
 	}
 
 	var b strings.Builder
-	b.WriteString("-- ▄    ▄▄▄  ▄▄ ▄▄  ▄▄▄▄ ▄▄▄▄▄▄ ▄▄    \n")
-	b.WriteString("--  ▀▄ ██▀██ ▀█▄█▀ ██▀▀▀   ██   ██    \n")
-	b.WriteString("-- ▄▀  ██▀██ ██ ██ ▀████   ██   ██▄▄▄ \n\n")
 
 	if len(execOnce) > 0 {
 		b.WriteString("hl.on(\"hyprland.start\", function()\n")

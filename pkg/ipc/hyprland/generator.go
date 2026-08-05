@@ -63,10 +63,6 @@ func parseColorString(str string) (string, string) {
 func (g *Generator) GenerateAppearance(config ipc.ConfigAppearance) string {
 	var out strings.Builder
 
-	out.WriteString("# ▄    ▄▄▄  ▄▄ ▄▄  ▄▄▄▄ ▄▄▄▄▄▄ ▄▄    \n")
-	out.WriteString("#  ▀▄ ██▀██ ▀█▄█▀ ██▀▀▀   ██   ██    \n")
-	out.WriteString("# ▄▀  ██▀██ ██ ██ ▀████   ██   ██▄▄▄ \n\n")
-
 	out.WriteString("general {\n")
 	if config.Gaps != nil {
 		if config.Gaps.Inner != nil {
@@ -410,9 +406,6 @@ func (g *Generator) GenerateStartup(exec []string, execOnce []string) string {
 	}
 
 	var out strings.Builder
-	out.WriteString("# ▄    ▄▄▄  ▄▄ ▄▄  ▄▄▄▄ ▄▄▄▄▄▄ ▄▄    \n")
-	out.WriteString("#  ▀▄ ██▀██ ▀█▄█▀ ██▀▀▀   ██   ██    \n")
-	out.WriteString("# ▄▀  ██▀██ ██ ██ ▀████   ██   ██▄▄▄ \n\n")
 	for _, cmd := range execOnce {
 		if strings.TrimSpace(cmd) == "" {
 			continue

@@ -11,6 +11,10 @@ import (
 	"strings"
 )
 
+const luaBanner = "-- ▄    ▄▄▄  ▄▄ ▄▄  ▄▄▄▄ ▄▄▄▄▄▄ ▄▄    \n--  ▀▄ ██▀██ ▀█▄█▀ ██▀▀▀   ██   ██    \n-- ▄▀  ██▀██ ██ ██ ▀████   ██   ██▄▄▄ \n"
+
+const confBanner = "# ▄    ▄▄▄  ▄▄ ▄▄  ▄▄▄▄ ▄▄▄▄▄▄ ▄▄    \n#  ▀▄ ██▀██ ▀█▄█▀ ██▀▀▀   ██   ██    \n# ▄▀  ██▀██ ██ ██ ▀████   ██   ██▄▄▄ \n"
+
 type ConfigHandler struct {
 	compositor ipc.Compositor
 	generator  ipc.ConfigGenerator
@@ -56,11 +60,9 @@ func (h *ConfigHandler) ApplyConfig(payload ipc.ConfigUniversal) error {
 	bindStr := h.generator.GenerateKeybinds(payload.Keybinds)
 	rulesStr := h.generator.GenerateWindowRules(payload.WindowRules)
 	layerStr := h.generator.GenerateLayerRules(payload.LayerRules)
-	if startupStr != "" {
-		appStr = strings.TrimPrefix(appStr, "# ▄    ▄▄▄  ▄▄ ▄▄  ▄▄▄▄ ▄▄▄▄▄▄ ▄▄    \n#  ▀▄ ██▀██ ▀█▄█▀ ██▀▀▀   ██   ██    \n# ▄▀  ██▀██ ██ ██ ▀████   ██   ██▄▄▄ \n\n")
-	}
 
 	var fullConfig strings.Builder
+	fullConfig.WriteString(confBanner)
 	fullConfig.WriteString(startupStr)
 	if startupStr != "" {
 		fullConfig.WriteString("\n")
@@ -96,10 +98,12 @@ func (h *ConfigHandler) ApplyConfig(payload ipc.ConfigUniversal) error {
 		luaLayers := h.luaGen.GenerateLayerRulesLua(payload.LayerRules)
 
 		var luaConfig strings.Builder
+		luaConfig.WriteString(luaBanner)
 		if luaStartup != "" {
-			luaConfig.WriteString(luaStartup)
 			luaConfig.WriteString("\n")
+			luaConfig.WriteString(luaStartup)
 		}
+		luaConfig.WriteString("\n")
 		luaConfig.WriteString(luaApp)
 		luaConfig.WriteString("\n")
 		luaConfig.WriteString(luaBinds)
