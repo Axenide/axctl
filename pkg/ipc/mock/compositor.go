@@ -21,6 +21,8 @@ type Compositor struct {
 	listWorkspacesErr  error
 	switchWorkspaceErr error
 	subscribeErr       error
+	reloadConfigErr    error
+	loadConfigErr      error
 
 	calls struct {
 		listWindows     int
@@ -29,6 +31,8 @@ type Compositor struct {
 		listWorkspaces  int
 		switchWorkspace []string
 		subscribe       int
+		reloadConfig    int
+		loadConfig      []string
 	}
 
 	subscribed bool
@@ -51,10 +55,13 @@ func NewCompositor() *Compositor {
 			listWorkspaces  int
 			switchWorkspace []string
 			subscribe       int
+			reloadConfig    int
+			loadConfig      []string
 		}{
 			focusWindow:     []string{},
 			closeWindow:     []string{},
 			switchWorkspace: []string{},
+			loadConfig:      []string{},
 		},
 	}
 }
@@ -274,6 +281,22 @@ func (c *Compositor) RawBatch(command string) error {
 }
 
 func (c *Compositor) ReloadConfig() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.calls.reloadConfig++
+	if c.reloadConfigErr != nil {
+		return c.reloadConfigErr
+	}
+	return nil
+}
+
+func (c *Compositor) LoadConfig(path string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.calls.loadConfig = append(c.calls.loadConfig, path)
+	if c.loadConfigErr != nil {
+		return c.loadConfigErr
+	}
 	return nil
 }
 
@@ -454,6 +477,20 @@ func (c *Compositor) SubscribeCalls() int {
 	return c.calls.subscribe
 }
 
+func (c *Compositor) ReloadConfigCalls() int {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.calls.reloadConfig
+}
+
+func (c *Compositor) LoadConfigCalls() []string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	calls := make([]string, len(c.calls.loadConfig))
+	copy(calls, c.calls.loadConfig)
+	return calls
+}
+
 func (c *Compositor) Reset() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -467,6 +504,8 @@ func (c *Compositor) Reset() {
 	c.listWorkspacesErr = nil
 	c.switchWorkspaceErr = nil
 	c.subscribeErr = nil
+	c.reloadConfigErr = nil
+	c.loadConfigErr = nil
 
 	c.calls.listWindows = 0
 	c.calls.focusWindow = []string{}
@@ -474,6 +513,8 @@ func (c *Compositor) Reset() {
 	c.calls.listWorkspaces = 0
 	c.calls.switchWorkspace = []string{}
 	c.calls.subscribe = 0
+	c.calls.reloadConfig = 0
+	c.calls.loadConfig = []string{}
 }
 
 func WindowToJSON(w ipc.Window) []byte {

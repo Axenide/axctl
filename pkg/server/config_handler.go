@@ -15,7 +15,7 @@ type ConfigHandler struct {
 	compositor ipc.Compositor
 	generator  ipc.ConfigGenerator
 	luaGen     ipc.LuaConfigGenerator
-	outputPath string
+	paths      configPaths
 }
 
 func NewConfigHandler(c ipc.Compositor) *ConfigHandler {
@@ -37,21 +37,15 @@ func NewConfigHandlerWithOutput(c ipc.Compositor, outputPath string) *ConfigHand
 		gen = nil
 	}
 
-	resolvedPath := outputPath
-	if resolvedPath == "" {
-		resolvedPath = DefaultOutputPath()
+	paths := PathsForCompositor(c)
+	if outputPath != "" {
+		paths = configPaths{primary: outputPath}
 	}
 
-	return &ConfigHandler{compositor: c, generator: gen, luaGen: lg, outputPath: resolvedPath}
+	return &ConfigHandler{compositor: c, generator: gen, luaGen: lg, paths: paths}
 }
 
-func DefaultOutputPath() string {
-	homeDir := os.Getenv("HOME")
-	if homeDir == "" {
-		homeDir = "/root"
-	}
-	return filepath.Join(homeDir, ".local", "share", "ambxst", "hyprland.conf")
-}
+func (h *ConfigHandler) OutputPath() string { return h.paths.primary }
 
 func (h *ConfigHandler) ApplyConfig(payload ipc.ConfigUniversal) error {
 	if h.generator == nil {
@@ -66,7 +60,6 @@ func (h *ConfigHandler) ApplyConfig(payload ipc.ConfigUniversal) error {
 		appStr = strings.TrimPrefix(appStr, "# ▄    ▄▄▄  ▄▄ ▄▄  ▄▄▄▄ ▄▄▄▄▄▄ ▄▄    \n#  ▀▄ ██▀██ ▀█▄█▀ ██▀▀▀   ██   ██    \n# ▄▀  ██▀██ ██ ██ ▀████   ██   ██▄▄▄ \n\n")
 	}
 
-	// Combine all generated config
 	var fullConfig strings.Builder
 	fullConfig.WriteString(startupStr)
 	if startupStr != "" {
@@ -80,8 +73,7 @@ func (h *ConfigHandler) ApplyConfig(payload ipc.ConfigUniversal) error {
 	fullConfig.WriteString("\n")
 	fullConfig.WriteString(layerStr)
 
-	// Write .conf file
-	configPath := h.outputPath
+	configPath := h.paths.primary
 	if configPath == "" {
 		configPath = DefaultOutputPath()
 	}
@@ -96,8 +88,7 @@ func (h *ConfigHandler) ApplyConfig(payload ipc.ConfigUniversal) error {
 	}
 	fmt.Printf("Config written to: %s\n", configPath)
 
-	// Write .lua file if Lua generator is available
-	if h.luaGen != nil {
+	if h.luaGen != nil && h.paths.alt != "" {
 		luaStartup := h.luaGen.GenerateStartupLua(payload.Exec, payload.ExecOnce)
 		luaApp := h.luaGen.GenerateAppearanceLua(payload.Appearance)
 		luaBinds := h.luaGen.GenerateKeybindsLua(payload.Keybinds)
@@ -117,7 +108,7 @@ func (h *ConfigHandler) ApplyConfig(payload ipc.ConfigUniversal) error {
 		luaConfig.WriteString("\n")
 		luaConfig.WriteString(luaLayers)
 
-		luaPath := strings.TrimSuffix(configPath, ".conf") + ".lua"
+		luaPath := h.paths.alt
 		if err := os.WriteFile(luaPath, []byte(luaConfig.String()), 0644); err != nil {
 			return fmt.Errorf("failed to write Lua config to %s: %w", luaPath, err)
 		}
@@ -128,6 +119,15 @@ func (h *ConfigHandler) ApplyConfig(payload ipc.ConfigUniversal) error {
 	fmt.Printf("Generated Keybinds:\n%s\n", bindStr)
 	fmt.Printf("Generated Window Rules:\n%s\n", rulesStr)
 	fmt.Printf("Generated Layer Rules:\n%s\n", layerStr)
-	// Finally trigger a reload
+	return h.loadGeneratedConfig(configPath)
+}
+
+func (h *ConfigHandler) loadGeneratedConfig(path string) error {
+	type loader interface {
+		LoadConfig(path string) error
+	}
+	if l, ok := h.compositor.(loader); ok {
+		return l.LoadConfig(path)
+	}
 	return h.compositor.ReloadConfig()
 }
