@@ -191,6 +191,17 @@ func TestListLayoutsParsesTextFallback(t *testing.T) {
 	}
 }
 
+func TestSetLayoutUpdatesConfig(t *testing.T) {
+	runFakeHyprlandSocketWith(t, nil, map[string]string{
+		"j/version": `{"version":"0.55.0"}`,
+		`eval hl.config({ general = { layout = "dwindle" } })`: "ok",
+	})
+	h := &Hyprland{signature: "test"}
+	if err := h.SetLayout("dwindle"); err != nil {
+		t.Fatalf("SetLayout error = %v", err)
+	}
+}
+
 func TestListLayoutsStaticFallbackWhenHyprctlUnknown(t *testing.T) {
 	runFakeHyprlandSocketWith(t, nil, map[string]string{
 		"j/layouts":                  "unknown request",
@@ -226,11 +237,17 @@ func TestParseHyprctlLayoutsList(t *testing.T) {
 }
 
 func runFakeHyprlandSocket(t *testing.T, versions []string) func() []string {
+	if versions == nil {
+		versions = []string{"{\"version\":\"0.55.0\"}"}
+	}
 	return runFakeHyprlandSocketWith(t, versions, map[string]string{})
 }
 
 func runFakeHyprlandSocketWith(t *testing.T, versions []string, responses map[string]string) func() []string {
 	t.Helper()
+	if versions == nil {
+		versions = []string{"{\"version\":\"0.55.0\"}"}
+	}
 
 	runtimeDir := t.TempDir()
 	socketDir := filepath.Join(runtimeDir, "hypr", "test")

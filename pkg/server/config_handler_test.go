@@ -189,7 +189,7 @@ func TestMangoClientImplementsLoadConfig(t *testing.T) {
 	}
 }
 
-func TestServerListLayoutsHandler(t *testing.T) {
+func TestServerLayoutCurrentHandler(t *testing.T) {
 	mockComp := mock.NewCompositor()
 	mockComp.SetLayouts([]ipc.Layout{
 		{Name: "dwindle"},
@@ -199,27 +199,203 @@ func TestServerListLayoutsHandler(t *testing.T) {
 	socketPath := filepath.Join(t.TempDir(), "daemon.sock")
 	srv := New(mockComp, socketPath)
 
-	serverErr := make(chan error, 1)
-	go func() { serverErr <- srv.Start() }()
-	defer func() {
-		_ = os.Remove(socketPath)
-	}()
+	go func() { _ = srv.Start() }()
+	defer func() { _ = os.Remove(socketPath) }()
 
-	var conn net.Conn
-	var dialErr error
-	deadline := time.Now().Add(time.Second)
-	for {
-		conn, dialErr = net.DialTimeout("unix", socketPath, 100*time.Millisecond)
-		if dialErr == nil {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("dial: %v", dialErr)
-		}
+	conn, dialErr := dialServer(t, socketPath)
+	if dialErr != nil {
+		t.Fatalf("dial: %v", dialErr)
 	}
 	defer conn.Close()
 
-	req := map[string]interface{}{"id": 1, "method": "System.ListLayouts", "params": map[string]interface{}{}}
+	if err := json.NewEncoder(conn).Encode(map[string]interface{}{
+		"id": 1, "method": "Layout.Current", "params": map[string]interface{}{},
+	}); err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	var resp struct {
+		Result ipc.Layout `json:"result"`
+		Error  string     `json:"error"`
+	}
+	if err := json.NewDecoder(conn).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Error != "" {
+		t.Fatalf("error: %s", resp.Error)
+	}
+	if resp.Result.Name != "master" || !resp.Result.Current {
+		t.Fatalf("current = %+v, want master/current", resp.Result)
+	}
+}
+
+func TestServerLayoutNextAndPrev(t *testing.T) {
+	mockComp := mock.NewCompositor()
+	mockComp.SetLayouts([]ipc.Layout{
+		{Name: "dwindle"},
+		{Name: "master", Current: true},
+		{Name: "scroller"},
+	})
+	socketPath := filepath.Join(t.TempDir(), "daemon.sock")
+	srv := New(mockComp, socketPath)
+
+	go func() { _ = srv.Start() }()
+	defer func() { _ = os.Remove(socketPath) }()
+
+	next := func(wrap interface{}) ipc.Layout {
+		t.Helper()
+		conn, dialErr := dialServer(t, socketPath)
+		if dialErr != nil {
+			t.Fatalf("dial: %v", dialErr)
+		}
+		defer conn.Close()
+		params := map[string]interface{}{}
+		if wrap != nil {
+			params["wrap"] = wrap
+		}
+		if err := json.NewEncoder(conn).Encode(map[string]interface{}{
+			"id": 1, "method": "Layout.Next", "params": params,
+		}); err != nil {
+			t.Fatalf("encode: %v", err)
+		}
+		var resp struct {
+			Result ipc.Layout `json:"result"`
+			Error  string     `json:"error"`
+		}
+		if err := json.NewDecoder(conn).Decode(&resp); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if resp.Error != "" {
+			t.Fatalf("error: %s", resp.Error)
+		}
+		return resp.Result
+	}
+	prev := func(wrap interface{}) ipc.Layout {
+		t.Helper()
+		conn, dialErr := dialServer(t, socketPath)
+		if dialErr != nil {
+			t.Fatalf("dial: %v", dialErr)
+		}
+		defer conn.Close()
+		params := map[string]interface{}{}
+		if wrap != nil {
+			params["wrap"] = wrap
+		}
+		if err := json.NewEncoder(conn).Encode(map[string]interface{}{
+			"id": 1, "method": "Layout.Prev", "params": params,
+		}); err != nil {
+			t.Fatalf("encode: %v", err)
+		}
+		var resp struct {
+			Result ipc.Layout `json:"result"`
+			Error  string     `json:"error"`
+		}
+		if err := json.NewDecoder(conn).Decode(&resp); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if resp.Error != "" {
+			t.Fatalf("error: %s", resp.Error)
+		}
+		return resp.Result
+	}
+
+	if got := next(nil); got.Name != "scroller" {
+		t.Fatalf("next(nil) = %q, want scroller (wrap default)", got.Name)
+	}
+	mockComp.SetLayouts([]ipc.Layout{
+		{Name: "dwindle"},
+		{Name: "master", Current: true},
+		{Name: "scroller"},
+	})
+	if got := next(false); got.Name != "scroller" {
+		t.Fatalf("next(wrap=false) from master = %q, want scroller", got.Name)
+	}
+	mockComp.SetLayouts([]ipc.Layout{
+		{Name: "dwindle", Current: true},
+		{Name: "master"},
+		{Name: "scroller"},
+	})
+	if got := prev(nil); got.Name != "scroller" {
+		t.Fatalf("prev from dwindle = %q, want scroller (wrap default)", got.Name)
+	}
+	mockComp.SetLayouts([]ipc.Layout{
+		{Name: "dwindle", Current: true},
+		{Name: "master"},
+		{Name: "scroller"},
+	})
+	if got := prev(false); got.Name != "dwindle" {
+		t.Fatalf("prev(wrap=false) from dwindle = %q, want dwindle (no wrap)", got.Name)
+	}
+}
+
+func TestServerLayoutSetRejectsUnknownName(t *testing.T) {
+	mockComp := mock.NewCompositor()
+	mockComp.SetLayouts([]ipc.Layout{
+		{Name: "dwindle"},
+		{Name: "master", Current: true},
+	})
+	socketPath := filepath.Join(t.TempDir(), "daemon.sock")
+	srv := New(mockComp, socketPath)
+
+	go func() { _ = srv.Start() }()
+	defer func() { _ = os.Remove(socketPath) }()
+
+	conn, dialErr := dialServer(t, socketPath)
+	if dialErr != nil {
+		t.Fatalf("dial: %v", dialErr)
+	}
+	defer conn.Close()
+
+	if err := json.NewEncoder(conn).Encode(map[string]interface{}{
+		"id": 1, "method": "Layout.Set", "params": map[string]interface{}{"name": "nope"},
+	}); err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	var resp struct {
+		Result interface{} `json:"result"`
+		Error  string      `json:"error"`
+	}
+	if err := json.NewDecoder(conn).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Error == "" {
+		t.Fatalf("expected error for unknown layout, got result: %+v", resp.Result)
+	}
+}
+
+func dialServer(t *testing.T, socketPath string) (net.Conn, error) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for {
+		conn, err := net.DialTimeout("unix", socketPath, 100*time.Millisecond)
+		if err == nil {
+			return conn, nil
+		}
+		if time.Now().After(deadline) {
+			return nil, err
+		}
+	}
+}
+
+func TestServerLayoutListHandler(t *testing.T) {
+	mockComp := mock.NewCompositor()
+	mockComp.SetLayouts([]ipc.Layout{
+		{Name: "dwindle"},
+		{Name: "master", Current: true},
+		{Name: "scroller"},
+	})
+	socketPath := filepath.Join(t.TempDir(), "daemon.sock")
+	srv := New(mockComp, socketPath)
+
+	go func() { _ = srv.Start() }()
+	defer func() { _ = os.Remove(socketPath) }()
+
+	conn, dialErr := dialServer(t, socketPath)
+	if dialErr != nil {
+		t.Fatalf("dial: %v", dialErr)
+	}
+	defer conn.Close()
+
+	req := map[string]interface{}{"id": 1, "method": "Layout.List", "params": map[string]interface{}{}}
 	if err := json.NewEncoder(conn).Encode(req); err != nil {
 		t.Fatalf("encode: %v", err)
 	}

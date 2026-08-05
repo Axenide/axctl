@@ -568,7 +568,7 @@ func (h *Hyprland) SetDpms(monitorID string, on bool) error {
 }
 
 func (h *Hyprland) SetLayout(name string) error {
-	_, err := h.dispatch(fmt.Sprintf("keyword general:layout %s", name))
+	_, err := h.dispatch(fmt.Sprintf("eval hl.config({ general = { layout = %q } })", name))
 	return err
 }
 

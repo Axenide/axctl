@@ -115,7 +115,11 @@ func usage() {
 	fmt.Println("    move-to <mon_id> [win_id] Move window to monitor")
 	fmt.Println("    set-dpms <mon_id> <0|1> Set DPMS on/off")
 	fmt.Println("\n  layout <action> [args]")
-	fmt.Println("    set <name>              Set layout")
+	fmt.Println("    list                    List available layouts (compositor introspection + static fallback)")
+	fmt.Println("    current                 Show the active layout")
+	fmt.Println("    set <name>              Set layout by name")
+	fmt.Println("    next [wrap=0|1]         Cycle to the next layout (wrap by default)")
+	fmt.Println("    prev [wrap=0|1]         Cycle to the previous layout (wrap by default)")
 	fmt.Println("\n  config <action> [args]")
 	fmt.Println("    get <key>               Get config value")
 	fmt.Println("    set <key> <value>       Set config key")
@@ -134,7 +138,6 @@ func usage() {
 	fmt.Println("\n  system <action> [args]")
 	fmt.Println("    execute <cmd>           Execute command")
 	fmt.Println("    get-cursor-position     Get absolute cursor position")
-	fmt.Println("    list-layouts            List available window layouts (compositor introspection + static fallback)")
 	fmt.Println("    switch-keyboard-layout [next|prev] Switch keyboard layout")
 	fmt.Println("    set-keyboard-layouts <layouts> [variants] Set keyboard layouts (e.g. \"us,es\" \"altgr-intl,\")")
 	fmt.Println("    idle-inhibit <0|1>      Inhibit or allow idle/sleep")
@@ -461,6 +464,17 @@ func handleRPC(category string, args []string) {
 		if len(args) > 1 {
 			params["name"] = args[1]
 		}
+	case "Layout.List":
+		// No args needed
+	case "Layout.Current":
+	case "Layout.Next":
+		if len(args) > 1 {
+			params["wrap"] = args[1] == "1" || strings.EqualFold(args[1], "true")
+		}
+	case "Layout.Prev":
+		if len(args) > 1 {
+			params["wrap"] = args[1] == "1" || strings.EqualFold(args[1], "true")
+		}
 	case "Config.Get":
 		if len(args) > 1 {
 			params["key"] = args[1]
@@ -600,8 +614,6 @@ func handleRPC(category string, args []string) {
 		}
 	case "System.MediaInhibitCheck":
 		// No args needed - checks PulseAudio/PipeWire sink-inputs
-	case "System.ListLayouts":
-		// No args needed
 	case "System.Exit":
 		// No args needed - exits the compositor
 	}

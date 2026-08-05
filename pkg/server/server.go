@@ -91,6 +91,75 @@ func (s *Server) listLayouts() (ipc.Layouts, error) {
 	}, nil
 }
 
+func (s *Server) currentLayout() (ipc.Layout, error) {
+	items, err := s.compositor.ListLayouts()
+	if err != nil {
+		return ipc.Layout{}, err
+	}
+	for _, item := range items {
+		if item.Current {
+			return item, nil
+		}
+	}
+	if len(items) > 0 {
+		return items[0], nil
+	}
+	return ipc.Layout{}, fmt.Errorf("no layouts available")
+}
+
+func (s *Server) cycleLayout(direction int, wrap *bool) (ipc.Layout, error) {
+	items, err := s.compositor.ListLayouts()
+	if err != nil {
+		return ipc.Layout{}, err
+	}
+	if len(items) == 0 {
+		return ipc.Layout{}, fmt.Errorf("no layouts available")
+	}
+	currentIdx := -1
+	for i, item := range items {
+		if item.Current {
+			currentIdx = i
+			break
+		}
+	}
+	doWrap := true
+	if wrap != nil {
+		doWrap = *wrap
+	}
+	nextIdx := currentIdx + direction
+	if nextIdx < 0 {
+		if doWrap {
+			nextIdx = len(items) - 1
+		} else {
+			return items[currentIdx], nil
+		}
+	}
+	if nextIdx >= len(items) {
+		if doWrap {
+			nextIdx = 0
+		} else {
+			return items[currentIdx], nil
+		}
+	}
+	target := items[nextIdx]
+	if err := s.compositor.SetLayout(target.Name); err != nil {
+		return ipc.Layout{}, err
+	}
+	for i := range items {
+		items[i].Current = items[i].Name == target.Name
+	}
+	return target, nil
+}
+
+func layoutExists(items []ipc.Layout, name string) bool {
+	for _, item := range items {
+		if item.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Server) compositorName() string {
 	switch s.compositor.(type) {
 	case *hyprland.Hyprland:
@@ -518,6 +587,8 @@ func (s *Server) handleConnection(conn net.Conn) {
 			}
 			err = s.compositor.SetDpms(p.MonitorID, p.On)
 
+		case "Layout.List":
+			result, err = s.listLayouts()
 		case "Layout.Set":
 			var p struct {
 				Name string `json:"name"`
@@ -526,7 +597,38 @@ func (s *Server) handleConnection(conn net.Conn) {
 				resp.Error = fmt.Sprintf("invalid params: %v", err)
 				break
 			}
+			if p.Name == "" {
+				resp.Error = "layout name is required"
+				break
+			}
+			if items, lerr := s.compositor.ListLayouts(); lerr == nil && len(items) > 0 {
+				if !layoutExists(items, p.Name) {
+					resp.Error = fmt.Sprintf("layout %q is not available; use Layout.List to see options", p.Name)
+					break
+				}
+			}
 			err = s.compositor.SetLayout(p.Name)
+
+		case "Layout.Current":
+			result, err = s.currentLayout()
+		case "Layout.Next":
+			var p struct {
+				Wrap *bool `json:"wrap,omitempty"`
+			}
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
+			result, err = s.cycleLayout(+1, p.Wrap)
+		case "Layout.Prev":
+			var p struct {
+				Wrap *bool `json:"wrap,omitempty"`
+			}
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
+			result, err = s.cycleLayout(-1, p.Wrap)
 
 		case "Config.Get":
 			var p struct {
@@ -625,8 +727,6 @@ func (s *Server) handleConnection(conn net.Conn) {
 				break
 			}
 			err = s.compositor.Execute(p.Command)
-		case "System.ListLayouts":
-			result, err = s.listLayouts()
 		case "System.GetCursorPosition":
 			var x, y int
 			x, y, err = s.compositor.GetCursorPosition()
