@@ -3,11 +3,13 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"axctl/pkg/ipc/wayland/client"
@@ -64,20 +66,40 @@ type systemInhibitor struct {
 }
 
 func NewIdleManager() (*IdleManager, error) {
-	display, err := client.Connect("")
-	if err != nil {
-		return nil, fmt.Errorf("wayland connect failed: %v", err)
-	}
-	registry, err := display.GetRegistry()
-	if err != nil {
-		return nil, fmt.Errorf("get registry failed: %v", err)
-	}
-
 	im := &IdleManager{
-		display:    display,
 		monitors:   make(map[uint32]*idleMonitor),
 		inhibitors: make(map[uint32]*idleInhibitor),
 	}
+
+	if err := im.connectWayland(); err != nil {
+		return nil, err
+	}
+
+	go im.dispatchLoop()
+
+	return im, nil
+}
+
+// connectWayland opens a fresh Wayland connection and binds the required
+// globals (wl_compositor, wl_seat, ext_idle_notifier_v1,
+// zwp_idle_inhibit_manager_v1). Used both for initial setup and for
+// reconnect after the compositor restarts (Hyprland/Niri/Mango).
+func (im *IdleManager) connectWayland() error {
+	display, err := client.Connect("")
+	if err != nil {
+		return fmt.Errorf("wayland connect failed: %v", err)
+	}
+	registry, err := display.GetRegistry()
+	if err != nil {
+		_ = display.Context().Close()
+		return fmt.Errorf("get registry failed: %v", err)
+	}
+
+	im.display = display
+	im.compositor = nil
+	im.seat = nil
+	im.notifier = nil
+	im.inhibitorMgr = nil
 
 	registry.SetGlobalHandler(func(e client.RegistryGlobalEvent) {
 		switch e.Interface {
@@ -102,32 +124,91 @@ func NewIdleManager() (*IdleManager, error) {
 
 	callback, err := display.Sync()
 	if err != nil {
-		return nil, err
+		_ = display.Context().Close()
+		return err
 	}
 	done := make(chan struct{})
 	callback.SetDoneHandler(func(e client.CallbackDoneEvent) { close(done) })
 
 	for {
 		if err := display.Context().GetDispatch()(); err != nil {
-			return nil, err
+			_ = display.Context().Close()
+			return err
 		}
 		select {
 		case <-done:
-			goto AfterSync
+			// Invalidate stale Wayland-bound proxy references. After a
+			// reconnect, monitors/inhibitors will be re-bound on next use.
+			im.invalidateStaleProxies()
+			return nil
 		default:
 		}
 	}
-AfterSync:
-	go func() {
-		for {
-			dispatchFunc := display.Context().GetDispatch()
-			if err := dispatchFunc(); err != nil {
+}
+
+// invalidateStaleProxies clears proxy fields that point into a now-dead
+// Display. They will be lazily recreated on next use.
+func (im *IdleManager) invalidateStaleProxies() {
+	im.wlMu.Lock()
+	defer im.wlMu.Unlock()
+	for _, mon := range im.monitors {
+		mon.notification = nil
+	}
+	for _, inh := range im.inhibitors {
+		inh.inhibitor = nil
+		inh.surface = nil
+	}
+}
+
+// dispatchLoop reads Wayland events. When the read fails (compositor
+// closed the socket, e.g. on Hyprland restart), it triggers reconnect
+// with exponential backoff and resumes dispatching on the new connection.
+func (im *IdleManager) dispatchLoop() {
+	for {
+		if im.display == nil {
+			// No connection; sleep and try to reconnect.
+			if !im.tryReconnectWithBackoff() {
 				return
 			}
+			continue
 		}
-	}()
+		if err := im.display.Context().Dispatch(); err != nil {
+			// Mark display as dead; the next iteration will reconnect.
+			im.display = nil
+		}
+	}
+}
 
-	return im, nil
+// tryReconnectWithBackoff tries connectWayland() with exponential backoff
+// capped at 30s. Returns true if reconnected, false if context cancelled.
+func (im *IdleManager) tryReconnectWithBackoff() bool {
+	backoff := 500 * time.Millisecond
+	const maxBackoff = 30 * time.Second
+	for {
+		if err := im.connectWayland(); err == nil {
+			return true
+		}
+		time.Sleep(backoff)
+		backoff *= 2
+		if backoff > maxBackoff {
+			backoff = maxBackoff
+		}
+	}
+}
+
+// isBrokenPipeErr reports whether err looks like a closed/broken Wayland
+// socket (EPIPE / ECONNRESET / use of closed connection).
+func isBrokenPipeErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, syscall.EPIPE) || errors.Is(err, syscall.ECONNRESET) {
+		return true
+	}
+	s := err.Error()
+	return strings.Contains(s, "broken pipe") ||
+		strings.Contains(s, "connection reset") ||
+		strings.Contains(s, "use of closed network connection")
 }
 
 func (im *IdleManager) SetIdleMonitorCallback(cb func(id uint32, isIdle bool)) {
@@ -498,25 +579,39 @@ func (im *IdleManager) refreshMonitor(mon *idleMonitor) error {
 		return fmt.Errorf("idle_notify not supported by compositor")
 	}
 
-	im.wlMu.Lock()
 	var notif *ext_idle_notify_v1.ExtIdleNotificationV1
 	var err error
-
-	if respectInhibitors {
-		notif, err = im.notifier.GetIdleNotification(timeoutMs, im.seat)
-	} else {
-		notif, err = im.notifier.GetInputIdleNotification(timeoutMs, im.seat)
+	for attempt := 0; attempt < 2; attempt++ {
+		if im.notifier == nil || im.seat == nil {
+			err = fmt.Errorf("idle_notify not supported by compositor")
+			break
+		}
+		im.wlMu.Lock()
+		if respectInhibitors {
+			notif, err = im.notifier.GetIdleNotification(timeoutMs, im.seat)
+		} else {
+			notif, err = im.notifier.GetInputIdleNotification(timeoutMs, im.seat)
+		}
+		if err == nil {
+			notif.SetIdledHandler(func(e ext_idle_notify_v1.ExtIdleNotificationV1IdledEvent) {
+				im.setMonitorIdle(mon, true)
+			})
+			notif.SetResumedHandler(func(e ext_idle_notify_v1.ExtIdleNotificationV1ResumedEvent) {
+				im.setMonitorIdle(mon, false)
+			})
+		}
+		im.wlMu.Unlock()
+		if err == nil {
+			break
+		}
+		if !isBrokenPipeErr(err) || attempt == 1 {
+			break
+		}
+		if rerr := im.connectWayland(); rerr != nil {
+			err = fmt.Errorf("wayland reconnect failed: %w (original: %v)", rerr, err)
+			break
+		}
 	}
-	if err == nil {
-		notif.SetIdledHandler(func(e ext_idle_notify_v1.ExtIdleNotificationV1IdledEvent) {
-			im.setMonitorIdle(mon, true)
-		})
-		notif.SetResumedHandler(func(e ext_idle_notify_v1.ExtIdleNotificationV1ResumedEvent) {
-			im.setMonitorIdle(mon, false)
-		})
-	}
-	im.wlMu.Unlock()
-
 	if err != nil {
 		return err
 	}
@@ -628,37 +723,62 @@ func (im *IdleManager) DestroyIdleInhibitor(id uint32) error {
 }
 
 func (im *IdleManager) setInhibitorEnabledLocked(inh *idleInhibitor, enabled bool) error {
-	im.wlMu.Lock()
-	defer im.wlMu.Unlock()
-
-	if enabled {
+	if !enabled {
+		im.wlMu.Lock()
 		if inh.inhibitor != nil {
-			return nil
+			inh.inhibitor.Destroy()
+			inh.inhibitor = nil
 		}
-		if im.compositor == nil || im.inhibitorMgr == nil {
-			return fmt.Errorf("idle_inhibit not supported by compositor")
+		if inh.surface != nil {
+			inh.surface.Destroy()
+			inh.surface = nil
 		}
-		surface, _ := im.compositor.CreateSurface()
-		inhibitor, err := im.inhibitorMgr.CreateInhibitor(surface)
-		if err != nil {
-			if surface != nil {
-				surface.Destroy()
-			}
-			return err
-		}
-		inh.surface = surface
-		inh.inhibitor = inhibitor
+		im.wlMu.Unlock()
 		return nil
 	}
 
 	if inh.inhibitor != nil {
-		inh.inhibitor.Destroy()
-		inh.inhibitor = nil
+		return nil
 	}
-	if inh.surface != nil {
-		inh.surface.Destroy()
-		inh.surface = nil
+
+	// Create path. Up to two attempts: if the first hits a broken-pipe
+	// error (compositor restarted, old Wayland socket is dead), reconnect
+	// synchronously and retry. After invalidateStaleProxies during
+	// reconnect, any prior proxies are already nil.
+	var surface *client.Surface
+	var inhibitor *idle_inhibit_v1.ZwpIdleInhibitorV1
+	var err error
+	for attempt := 0; attempt < 2; attempt++ {
+		if im.compositor == nil || im.inhibitorMgr == nil {
+			err = fmt.Errorf("idle_inhibit not supported by compositor")
+			break
+		}
+		im.wlMu.Lock()
+		surface, _ = im.compositor.CreateSurface()
+		inhibitor, err = im.inhibitorMgr.CreateInhibitor(surface)
+		im.wlMu.Unlock()
+		if err == nil {
+			break
+		}
+		if surface != nil {
+			im.wlMu.Lock()
+			surface.Destroy()
+			im.wlMu.Unlock()
+			surface = nil
+		}
+		if !isBrokenPipeErr(err) || attempt == 1 {
+			break
+		}
+		if rerr := im.connectWayland(); rerr != nil {
+			err = fmt.Errorf("wayland reconnect failed: %w (original: %v)", rerr, err)
+			break
+		}
 	}
+	if err != nil {
+		return err
+	}
+	inh.surface = surface
+	inh.inhibitor = inhibitor
 	return nil
 }
 
