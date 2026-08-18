@@ -192,7 +192,7 @@ The daemon uses these environment variables to detect sockets:
 
 - `XDG_RUNTIME_DIR` for Wayland sockets
 - `WAYLAND_DISPLAY` for Mango fallback
-- `NIRI_SOCKET` for Niri
+- `NIRI_SOCKET` for Niri (optional; auto-discovered from `$XDG_RUNTIME_DIR/niri*.sock` when unset)
 - `HYPRLAND_INSTANCE_SIGNATURE` for Hyprland
 
 The daemon listens on:

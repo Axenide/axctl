@@ -588,6 +588,12 @@ func (s *Server) handleConnection(conn net.Conn) {
 			if err == nil {
 				result = map[string]int{"x": x, "y": y}
 			}
+		case "System.GetCapabilities":
+			var caps ipc.Capabilities
+			caps, err = s.compositor.GetCapabilities()
+			if err == nil {
+				result = caps
+			}
 		case "System.IdleInhibit":
 			if s.idleMgr == nil {
 				resp.Error = "Idle management not supported on this session"

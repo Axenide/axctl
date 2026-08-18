@@ -39,10 +39,26 @@ func NewConfigHandlerWithOutput(c ipc.Compositor, outputPath string) *ConfigHand
 
 	resolvedPath := outputPath
 	if resolvedPath == "" {
-		resolvedPath = DefaultOutputPath()
+		resolvedPath = DefaultOutputPathFor(c)
 	}
 
 	return &ConfigHandler{compositor: c, generator: gen, luaGen: lg, outputPath: resolvedPath}
+}
+
+// DefaultOutputPathFor returns the compositor-specific config output path.
+// Hyprland uses a sourced .conf; niri uses a dedicated generated file that is
+// included from config.kdl (so we never overwrite the user's config).
+func DefaultOutputPathFor(c ipc.Compositor) string {
+	homeDir := os.Getenv("HOME")
+	if homeDir == "" {
+		homeDir = "/root"
+	}
+	switch c.(type) {
+	case *niri.Niri:
+		return filepath.Join(homeDir, ".config", "niri", "ambxst-generated.kdl")
+	default:
+		return filepath.Join(homeDir, ".local", "share", "ambxst", "hyprland.conf")
+	}
 }
 
 func DefaultOutputPath() string {
@@ -95,6 +111,25 @@ func (h *ConfigHandler) ApplyConfig(payload ipc.ConfigUniversal) error {
 		return fmt.Errorf("failed to write config to %s: %w", configPath, err)
 	}
 	fmt.Printf("Config written to: %s\n", configPath)
+
+	// For niri, ensure config.kdl includes the generated file so the user's
+	// config is never overwritten.
+	if _, ok := h.compositor.(*niri.Niri); ok {
+		mainPath := filepath.Join(filepath.Dir(configPath), "config.kdl")
+		includeLine := `include "` + filepath.Base(configPath) + `"`
+		mainData, err := os.ReadFile(mainPath)
+		if err != nil {
+			// No config.kdl yet — create one with just the include.
+			if werr := os.WriteFile(mainPath, []byte(includeLine+"\n"), 0644); werr != nil {
+				return werr
+			}
+		} else if !strings.Contains(string(mainData), includeLine) {
+			updated := includeLine + "\n" + string(mainData)
+			if werr := os.WriteFile(mainPath, []byte(updated), 0644); werr != nil {
+				return werr
+			}
+		}
+	}
 
 	// Write .lua file if Lua generator is available
 	if h.luaGen != nil {
