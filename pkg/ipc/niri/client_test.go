@@ -158,6 +158,9 @@ func TestListMonitors(t *testing.T) {
 	if mons[0].Width != 1920 {
 		t.Fatalf("expected width 1920, got %d", mons[0].Width)
 	}
+	if !mons[0].IsFocused {
+		t.Fatal("expected eDP-1 to be focused (derived from focused workspace)")
+	}
 }
 
 func TestActiveWindow(t *testing.T) {

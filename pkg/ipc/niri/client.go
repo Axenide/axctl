@@ -503,13 +503,36 @@ func (n *Niri) ListMonitors() ([]ipc.Monitor, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// niri does not report a "focused" flag on Outputs directly, but the
+	// focused workspace carries both is_focused and its output name. Use that
+	// to determine which output is currently focused.
+	focusedOutput := ""
+	{
+		var niriWorkspaces []struct {
+			ID       int    `json:"id"`
+			Name     string `json:"name"`
+			Output   string `json:"output"`
+			IsFocused bool  `json:"is_focused"`
+			IsActive bool   `json:"is_active"`
+		}
+		if wsErr := n.requestQuery("Workspaces", &niriWorkspaces); wsErr == nil {
+			for _, w := range niriWorkspaces {
+				if w.IsFocused {
+					focusedOutput = w.Output
+					break
+				}
+			}
+		}
+	}
+
 	res := make([]ipc.Monitor, 0, len(niriOutputs))
 	for _, o := range niriOutputs {
 		m := ipc.Monitor{
 			ID:          o.Name,
 			Name:        o.Name,
 			Description: fmt.Sprintf("%s %s", o.Make, o.Model),
-			IsFocused:   false, // Niri doesn't provide this directly here
+			IsFocused:   o.Name == focusedOutput, // derived from focused workspace
 			Metadata:    make(map[string]interface{}),
 		}
 		if o.Logical != nil {
