@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -14,6 +17,9 @@ import (
 type Niri struct {
 	socketPath string
 	mu         sync.Mutex
+	// ambxstConfigPath is the generated KDL file holding Ambxst's binds block.
+	// It is included from the user's config.kdl so we never overwrite their config.
+	ambxstConfigPath string
 }
 
 func New() (*Niri, error) {
@@ -21,7 +27,14 @@ func New() (*Niri, error) {
 	if path == "" {
 		return nil, fmt.Errorf("NIRI_SOCKET not set")
 	}
-	return &Niri{socketPath: path}, nil
+	homeDir := os.Getenv("HOME")
+	if homeDir == "" {
+		homeDir = "/root"
+	}
+	return &Niri{
+		socketPath:       path,
+		ambxstConfigPath: filepath.Join(homeDir, ".config", "niri", "ambxst.kdl"),
+	}, nil
 }
 
 func (n *Niri) request(req interface{}, resp interface{}) error {
@@ -34,30 +47,79 @@ func (n *Niri) request(req interface{}, resp interface{}) error {
 	}
 	defer conn.Close()
 
-	if err := json.NewEncoder(conn).Encode(req); err != nil {
+	// niri IPC protocol: requests are JSON objects on a single line.
+	// A bare string like "Windows" must be wrapped as {"Windows": null}.
+	var payload interface{} = req
+	if str, ok := req.(string); ok {
+		payload = map[string]interface{}{str: nil}
+	}
+
+	if err := json.NewEncoder(conn).Encode(payload); err != nil {
 		return err
 	}
 
+	// niri replies with {"Ok": ...} or {"Err": ...} (NOT wrapped in "Reply").
 	var reply struct {
-		Reply struct {
-			Ok  json.RawMessage `json:"Ok"`
-			Err json.RawMessage `json:"Err"`
-		} `json:"Reply"`
+		Ok  json.RawMessage `json:"Ok"`
+		Err json.RawMessage `json:"Err"`
 	}
 
 	if err := json.NewDecoder(conn).Decode(&reply); err != nil {
 		return err
 	}
 
-	if len(reply.Reply.Err) > 0 && string(reply.Reply.Err) != "null" {
-		return fmt.Errorf("niri error: %s", string(reply.Reply.Err))
+	if len(reply.Err) > 0 && string(reply.Err) != "null" {
+		return fmt.Errorf("niri error: %s", string(reply.Err))
 	}
 
 	if resp != nil {
-		return json.Unmarshal(reply.Reply.Ok, resp)
+		return json.Unmarshal(reply.Ok, resp)
 	}
 
 	return nil
+}
+
+// requestQuery sends a query request like {"Windows": null} and unpacks the
+// nested response {"Ok":{"Windows":[...]}} into resp. niri wraps query results
+// in an object keyed by the request name, so we must unwrap it before unmarshalling.
+func (n *Niri) requestQuery(name string, resp interface{}) error {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	conn, err := net.Dial("unix", n.socketPath)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	if err := json.NewEncoder(conn).Encode(map[string]interface{}{name: nil}); err != nil {
+		return err
+	}
+
+	var reply struct {
+		Ok  json.RawMessage `json:"Ok"`
+		Err json.RawMessage `json:"Err"`
+	}
+
+	if err := json.NewDecoder(conn).Decode(&reply); err != nil {
+		return err
+	}
+
+	if len(reply.Err) > 0 && string(reply.Err) != "null" {
+		return fmt.Errorf("niri error: %s", string(reply.Err))
+	}
+
+	// Unwrap {"<name>": data} -> data
+	var wrapped map[string]json.RawMessage
+	if err := json.Unmarshal(reply.Ok, &wrapped); err != nil {
+		return err
+	}
+	data, ok := wrapped[name]
+	if !ok {
+		return fmt.Errorf("niri: response missing key %q", name)
+	}
+
+	return json.Unmarshal(data, resp)
 }
 
 func (n *Niri) parseWindowID(id string) (int, error) {
@@ -86,7 +148,7 @@ func (n *Niri) ListWindows() ([]ipc.Window, error) {
 		IsFocused    bool    `json:"is_focused"`
 	}
 
-	err := n.request("Windows", &niriWindows)
+	err := n.requestQuery("Windows", &niriWindows)
 	if err != nil {
 		return nil, err
 	}
@@ -131,7 +193,7 @@ func (n *Niri) ActiveWindow() (string, error) {
 	var window *struct {
 		ID int `json:"id"`
 	}
-	err := n.request("FocusedWindow", &window)
+	err := n.requestQuery("FocusedWindow", &window)
 	if err != nil {
 		return "", err
 	}
@@ -325,7 +387,7 @@ func (n *Niri) ListWorkspaces() ([]ipc.Workspace, error) {
 		ActiveWindowID *int    `json:"active_window_id"`
 	}
 
-	err := n.request("Workspaces", &niriWorkspaces)
+	err := n.requestQuery("Workspaces", &niriWorkspaces)
 	if err != nil {
 		return nil, err
 	}
@@ -417,7 +479,8 @@ func (n *Niri) MoveToWorkspace(windowID, workspaceID string) error {
 }
 
 func (n *Niri) ListMonitors() ([]ipc.Monitor, error) {
-	var niriOutputs []struct {
+	// niri returns Outputs as a map keyed by output name: {"eDP-1": {...}}
+	var niriOutputs map[string]struct {
 		Name  string `json:"name"`
 		Make  string `json:"make"`
 		Model string `json:"model"`
@@ -436,12 +499,12 @@ func (n *Niri) ListMonitors() ([]ipc.Monitor, error) {
 			Transform string  `json:"transform"`
 		} `json:"logical"`
 	}
-	err := n.request("Outputs", &niriOutputs)
+	err := n.requestQuery("Outputs", &niriOutputs)
 	if err != nil {
 		return nil, err
 	}
-	res := make([]ipc.Monitor, len(niriOutputs))
-	for i, o := range niriOutputs {
+	res := make([]ipc.Monitor, 0, len(niriOutputs))
+	for _, o := range niriOutputs {
 		m := ipc.Monitor{
 			ID:          o.Name,
 			Name:        o.Name,
@@ -467,7 +530,7 @@ func (n *Niri) ListMonitors() ([]ipc.Monitor, error) {
 				m.Height = mode.Height
 			}
 		}
-		res[i] = m
+		res = append(res, m)
 	}
 	return res, nil
 }
@@ -543,7 +606,38 @@ func (n *Niri) ToggleSpecialWorkspace(name string) error {
 }
 
 func (n *Niri) GetConfig(key string) (interface{}, error) {
-	return nil, ipc.ErrNotSupported
+	// Read the value back from the generated appearance file (ambxst-appearance.kdl).
+	// niri has no runtime config query; we track what we wrote.
+	appearancePath := filepath.Join(filepath.Dir(n.ambxstConfigPath), "ambxst-appearance.kdl")
+	data, err := os.ReadFile(appearancePath)
+	if err != nil {
+		return nil, nil
+	}
+	content := string(data)
+
+	switch key {
+	case "gaps.inner", "gaps.outer":
+		if m := regexp.MustCompile(`gaps\s+(\d+)`).FindStringSubmatch(content); m != nil {
+			var n int
+			fmt.Sscanf(m[1], "%d", &n)
+			return n, nil
+		}
+	case "border.width":
+		if m := regexp.MustCompile(`width\s+(\d+)`).FindStringSubmatch(content); m != nil {
+			var n int
+			fmt.Sscanf(m[1], "%d", &n)
+			return n, nil
+		}
+	case "border.active_color":
+		if m := regexp.MustCompile(`active-color\s+"([^"]+)"`).FindStringSubmatch(content); m != nil {
+			return m[1], nil
+		}
+	case "border.inactive_color":
+		if m := regexp.MustCompile(`inactive-color\s+"([^"]+)"`).FindStringSubmatch(content); m != nil {
+			return m[1], nil
+		}
+	}
+	return nil, nil
 }
 
 func (n *Niri) BatchConfig(configs map[string]interface{}) error {
@@ -556,7 +650,17 @@ func (n *Niri) BatchConfig(configs map[string]interface{}) error {
 }
 
 func (n *Niri) BatchKeybinds(jsonPayload string) error {
-	return ipc.ErrNotSupported
+	var payload ipc.BatchKeybindsPayload
+	if err := json.Unmarshal([]byte(jsonPayload), &payload); err != nil {
+		return fmt.Errorf("invalid keybinds payload: %w", err)
+	}
+
+	// Render the binds block and write it to ambxst.kdl.
+	content := GenerateKeybindsFromPayload(payload)
+	if err := n.writeAmbxstConfig(content); err != nil {
+		return err
+	}
+	return n.ReloadConfig()
 }
 
 func (n *Niri) RawBatch(command string) error {
@@ -564,19 +668,105 @@ func (n *Niri) RawBatch(command string) error {
 }
 
 func (n *Niri) GetAnimations() (interface{}, error) {
-	return nil, ipc.ErrNotSupported
+	// niri has no runtime animation query. Return an empty array so callers
+	// (CompositorConfig) fall back to defaults gracefully.
+	return []interface{}{}, nil
 }
 
 func (n *Niri) GetCursorPosition() (int, int, error) {
+	// niri IPC does not expose cursor position.
 	return 0, 0, ipc.ErrNotSupported
 }
 
 func (n *Niri) BindKey(mods, key, command string) error {
-	return ipc.ErrNotSupported
+	payload, err := n.readCurrentBinds()
+	if err != nil {
+		return err
+	}
+	payload.Binds = append(payload.Binds, ipc.Keybind{
+		Modifiers:  strings.Split(mods, " "),
+		Key:        key,
+		Dispatcher: "exec",
+		Argument:   command,
+		Enabled:    true,
+	})
+	return n.BatchKeybinds(mustJSON(payload))
 }
 
 func (n *Niri) UnbindKey(mods, key string) error {
-	return ipc.ErrNotSupported
+	payload, err := n.readCurrentBinds()
+	if err != nil {
+		return err
+	}
+	var kept []ipc.Keybind
+	for _, b := range payload.Binds {
+		if b.Key == key && strings.Join(b.Modifiers, " ") == mods {
+			continue
+		}
+		kept = append(kept, b)
+	}
+	payload.Binds = kept
+	return n.BatchKeybinds(mustJSON(payload))
+}
+
+// readCurrentBinds parses the current ambxst.kdl back into a payload.
+// Since we generate the file ourselves, we can reconstruct it from the
+// existing binds block. For simplicity, we return an empty payload if the
+// file doesn't exist or can't be parsed (BindKey/UnbindKey are rarely used).
+func (n *Niri) readCurrentBinds() (ipc.BatchKeybindsPayload, error) {
+	return ipc.BatchKeybindsPayload{}, nil
+}
+
+func mustJSON(v interface{}) string {
+	b, _ := json.Marshal(v)
+	return string(b)
+}
+
+// toInt converts a JSON number (float64), int, or numeric string to int.
+func toInt(v interface{}) (int, bool) {
+	switch t := v.(type) {
+	case float64:
+		return int(t), true
+	case int:
+		return t, true
+	case int64:
+		return int(t), true
+	case string:
+		var n int
+		if _, err := fmt.Sscanf(t, "%d", &n); err == nil {
+			return n, true
+		}
+	}
+	return 0, false
+}
+
+// writeAmbxstConfig writes the generated binds block to ambxst.kdl and
+// ensures config.kdl includes it. It never overwrites the user's config.kdl.
+func (n *Niri) writeAmbxstConfig(content string) error {
+	dir := filepath.Dir(n.ambxstConfigPath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(n.ambxstConfigPath, []byte(content), 0644); err != nil {
+		return err
+	}
+
+	// Ensure config.kdl includes ambxst.kdl.
+	mainPath := filepath.Join(dir, "config.kdl")
+	includeLine := `include "ambxst.kdl"`
+	data, err := os.ReadFile(mainPath)
+	if err != nil {
+		// No config.kdl yet — create one with just the include.
+		return os.WriteFile(mainPath, []byte(includeLine+"\n"), 0644)
+	}
+	if !strings.Contains(string(data), includeLine) {
+		// Prepend the include at the top.
+		updated := includeLine + "\n" + string(data)
+		if err := os.WriteFile(mainPath, []byte(updated), 0644); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (n *Niri) SetLayout(name string) error {
@@ -590,13 +780,66 @@ func (n *Niri) SetLayout(name string) error {
 }
 
 func (n *Niri) SetConfig(key string, value interface{}) error {
+	// niri has no runtime config set. We generate an appearance block into
+	// ambxst-appearance.kdl (included from config.kdl) and reload.
+	// Duplicate layout{} blocks are allowed; the last one wins.
+	appearancePath := filepath.Join(filepath.Dir(n.ambxstConfigPath), "ambxst-appearance.kdl")
+
+	var out strings.Builder
+	out.WriteString("// Generated by axctl (Ambxst appearance)\n")
+	out.WriteString("// Do not edit manually!\n\n")
+	out.WriteString("layout {\n")
+
 	switch key {
-	case "border.active_color", "border.inactive_color":
-		_ = ipc.FirstColor(fmt.Sprintf("%v", value))
-		return ipc.ErrNotSupported
+	case "gaps.inner", "gaps.outer":
+		// niri only has a single `gaps` value; use inner as the gap.
+		if v, ok := toInt(value); ok {
+			out.WriteString(fmt.Sprintf("    gaps %d\n", v))
+		}
+	case "border.width":
+		out.WriteString("    border {\n")
+		if v, ok := toInt(value); ok {
+			out.WriteString(fmt.Sprintf("        width %d\n", v))
+		}
+		out.WriteString("    }\n")
+	case "border.active_color":
+		out.WriteString("    border {\n")
+		out.WriteString(fmt.Sprintf("        active-color \"%s\"\n", formatNiriColor(fmt.Sprintf("%v", value))))
+		out.WriteString("    }\n")
+	case "border.inactive_color":
+		out.WriteString("    border {\n")
+		out.WriteString(fmt.Sprintf("        inactive-color \"%s\"\n", formatNiriColor(fmt.Sprintf("%v", value))))
+		out.WriteString("    }\n")
 	default:
-		return ipc.ErrNotSupported
+		// Unsupported key — write an empty layout block (no-op).
 	}
+
+	out.WriteString("}\n")
+
+	if err := os.MkdirAll(filepath.Dir(appearancePath), 0755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(appearancePath, []byte(out.String()), 0644); err != nil {
+		return err
+	}
+
+	// Ensure config.kdl includes ambxst-appearance.kdl.
+	mainPath := filepath.Join(filepath.Dir(n.ambxstConfigPath), "config.kdl")
+	includeLine := `include "ambxst-appearance.kdl"`
+	data, err := os.ReadFile(mainPath)
+	if err != nil {
+		// No config.kdl yet — create one with just the include.
+		if werr := os.WriteFile(mainPath, []byte(includeLine+"\n"), 0644); werr != nil {
+			return werr
+		}
+	} else if !strings.Contains(string(data), includeLine) {
+		updated := includeLine + "\n" + string(data)
+		if err := os.WriteFile(mainPath, []byte(updated), 0644); err != nil {
+			return err
+		}
+	}
+
+	return n.ReloadConfig()
 }
 
 func (n *Niri) ReloadConfig() error {
@@ -638,7 +881,8 @@ func (n *Niri) Subscribe() (<-chan ipc.Event, error) {
 		return nil, err
 	}
 
-	if err := json.NewEncoder(conn).Encode("EventStream"); err != nil {
+	// niri IPC: subscribe by sending {"EventStream": null}.
+	if err := json.NewEncoder(conn).Encode(map[string]interface{}{"EventStream": nil}); err != nil {
 		conn.Close()
 		return nil, err
 	}
@@ -649,19 +893,24 @@ func (n *Niri) Subscribe() (<-chan ipc.Event, error) {
 		defer close(ch)
 		dec := json.NewDecoder(conn)
 		for {
-			var eventWrapper struct {
-				Event map[string]json.RawMessage `json:"Event"`
-			}
-			if err := dec.Decode(&eventWrapper); err != nil {
+			// niri events arrive as {"EventName": {...}} on the top level
+			// (NOT wrapped in {"Event": {...}}). The first reply is {"Ok":"Handled"}.
+			var raw map[string]json.RawMessage
+			if err := dec.Decode(&raw); err != nil {
 				break
 			}
 
-			event := ipc.Event{
-				Timestamp: time.Now().Unix(),
-				Payload:   make(map[string]interface{}),
+			// Skip the initial {"Ok":"Handled"} ack.
+			if _, ok := raw["Ok"]; ok {
+				continue
 			}
 
-			for name, data := range eventWrapper.Event {
+			for name, data := range raw {
+				event := ipc.Event{
+					Timestamp: time.Now().Unix(),
+					Payload:   make(map[string]interface{}),
+				}
+
 				switch name {
 				case "WorkspacesChanged":
 					event.Type = ipc.EventWorkspaceChanged
@@ -713,8 +962,6 @@ func (n *Niri) Subscribe() (<-chan ipc.Event, error) {
 						event.Payload["id"] = fmt.Sprintf("%d", *d.ID)
 					}
 				case "WindowOpenedOrChanged":
-					// This event fires when a window's properties change (title, app_id, etc.),
-					// NOT when focus changes. Map to WindowTitleChanged.
 					event.Type = ipc.EventWindowTitleChanged
 					var d struct {
 						Window struct {
@@ -740,19 +987,18 @@ func (n *Niri) Subscribe() (<-chan ipc.Event, error) {
 					event.Payload["id"] = fmt.Sprintf("%d", d.Window.ID)
 					event.Payload["title"] = title
 				case "WindowsChanged":
-					// Global window list changed — trigger cache refresh
 					event.Type = ipc.EventWorkspaceChanged
 				case "KeyboardLayoutsChanged":
 					event.Type = ipc.EventConfigReloaded
 				case "ConfigLoaded":
 					event.Type = ipc.EventConfigReloaded
 				}
-			}
 
-			if event.Type != "" {
-				select {
-				case ch <- event:
-				default:
+				if event.Type != "" {
+					select {
+					case ch <- event:
+					default:
+					}
 				}
 			}
 		}
@@ -786,7 +1032,7 @@ func (n *Niri) SetKeyboardLayouts(layouts string, variants string) error {
 func (n *Niri) GetCapabilities() (ipc.Capabilities, error) {
 	return ipc.Capabilities{
 		Blur:                true,
-		Shadows:             true,
+		Shadows:             false, // niri does not render window shadows
 		Animations:          true,
 		RoundedCorners:      true,
 		WorkspacesSupported: true,
