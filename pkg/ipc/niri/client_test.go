@@ -161,6 +161,9 @@ func TestListMonitors(t *testing.T) {
 	if !mons[0].IsFocused {
 		t.Fatal("expected eDP-1 to be focused (derived from focused workspace)")
 	}
+	if mons[0].Metadata["active_workspace"] != "1" {
+		t.Fatalf("expected active_workspace=1, got %v", mons[0].Metadata["active_workspace"])
+	}
 }
 
 func TestActiveWindow(t *testing.T) {

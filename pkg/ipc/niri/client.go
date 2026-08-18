@@ -146,6 +146,9 @@ func (n *Niri) ListWindows() ([]ipc.Window, error) {
 		IsFloating   bool    `json:"is_floating"`
 		IsFullscreen bool    `json:"is_fullscreen"`
 		IsFocused    bool    `json:"is_focused"`
+		Layout       *struct {
+			WindowSize []float64 `json:"window_size"`
+		} `json:"layout"`
 	}
 
 	err := n.requestQuery("Windows", &niriWindows)
@@ -172,6 +175,17 @@ func (n *Niri) ListWindows() ([]ipc.Window, error) {
 			monitorID = wsOutputMap[wsID]
 		}
 
+		metadata := map[string]interface{}{
+			"monitor_id": monitorID,
+		}
+		// niri reports window size via layout.window_size [w, h].
+		// It does not expose an absolute position, so x/y stay 0 — the
+		// QML overview renders a real-size preview and lays windows out itself.
+		if w.Layout != nil && len(w.Layout.WindowSize) == 2 {
+			metadata["width"] = int(w.Layout.WindowSize[0])
+			metadata["height"] = int(w.Layout.WindowSize[1])
+		}
+
 		windows[i] = ipc.Window{
 			ID:           fmt.Sprintf("%d", w.ID),
 			Title:        title,
@@ -181,9 +195,7 @@ func (n *Niri) ListWindows() ([]ipc.Window, error) {
 			IsFloating:   w.IsFloating,
 			IsFullscreen: w.IsFullscreen,
 			IsHidden:     false,
-			Metadata: map[string]interface{}{
-				"monitor_id": monitorID,
-			},
+			Metadata:     metadata,
 		}
 	}
 	return windows, nil
@@ -508,19 +520,22 @@ func (n *Niri) ListMonitors() ([]ipc.Monitor, error) {
 	// focused workspace carries both is_focused and its output name. Use that
 	// to determine which output is currently focused.
 	focusedOutput := ""
+	activeWorkspaceByOutput := make(map[string]int)
 	{
 		var niriWorkspaces []struct {
-			ID       int    `json:"id"`
-			Name     string `json:"name"`
-			Output   string `json:"output"`
-			IsFocused bool  `json:"is_focused"`
-			IsActive bool   `json:"is_active"`
+			ID        int    `json:"id"`
+			Name      string `json:"name"`
+			Output    string `json:"output"`
+			IsFocused bool   `json:"is_focused"`
+			IsActive  bool   `json:"is_active"`
 		}
 		if wsErr := n.requestQuery("Workspaces", &niriWorkspaces); wsErr == nil {
 			for _, w := range niriWorkspaces {
 				if w.IsFocused {
 					focusedOutput = w.Output
-					break
+				}
+				if w.IsActive {
+					activeWorkspaceByOutput[w.Output] = w.ID
 				}
 			}
 		}
@@ -534,6 +549,9 @@ func (n *Niri) ListMonitors() ([]ipc.Monitor, error) {
 			Description: fmt.Sprintf("%s %s", o.Make, o.Model),
 			IsFocused:   o.Name == focusedOutput, // derived from focused workspace
 			Metadata:    make(map[string]interface{}),
+		}
+		if id, ok := activeWorkspaceByOutput[o.Name]; ok {
+			m.Metadata["active_workspace"] = fmt.Sprintf("%d", id)
 		}
 		if o.Logical != nil {
 			m.Width = o.Logical.Width
