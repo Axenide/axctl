@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -431,6 +432,14 @@ func (n *Niri) ListWorkspaces() ([]ipc.Workspace, error) {
 			},
 		}
 	}
+	// Sort by the workspace index (idx) so the overview shows workspaces in
+	// their real order. niri returns them in an arbitrary order, and the
+	// Ambxst overview relies on this ordering for the scrolling column.
+	sort.SliceStable(res, func(a, b int) bool {
+		ai, _ := res[a].Metadata["index"].(int)
+		bi, _ := res[b].Metadata["index"].(int)
+		return ai < bi
+	})
 	return res, nil
 }
 
