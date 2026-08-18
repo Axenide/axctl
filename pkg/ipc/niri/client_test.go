@@ -106,6 +106,23 @@ func newTestNiri(t *testing.T) (*Niri, func()) {
 	return n, cleanup
 }
 
+func TestNewFindsSocketByGlob(t *testing.T) {
+	t.Helper()
+	sock, cleanup := startFakeNiri(t)
+	defer cleanup()
+	home := t.TempDir()
+	os.Setenv("HOME", home)
+	os.Setenv("XDG_RUNTIME_DIR", filepath.Dir(sock))
+	os.Unsetenv("NIRI_SOCKET")
+	n, err := New()
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if n.socketPath != sock {
+		t.Fatalf("expected socket %q, got %q", sock, n.socketPath)
+	}
+}
+
 func TestListWindows(t *testing.T) {
 	n, cleanup := newTestNiri(t)
 	defer cleanup()

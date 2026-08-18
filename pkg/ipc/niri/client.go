@@ -26,7 +26,14 @@ type Niri struct {
 func New() (*Niri, error) {
 	path := os.Getenv("NIRI_SOCKET")
 	if path == "" {
-		return nil, fmt.Errorf("NIRI_SOCKET not set")
+		// niri does not export NIRI_SOCKET into the environment of
+		// spawn-at-startup children, so fall back to discovering the
+		// running instance's socket by globbing the runtime dir.
+		matches, err := filepath.Glob(filepath.Join(os.Getenv("XDG_RUNTIME_DIR"), "niri*.sock"))
+		if err != nil || len(matches) == 0 {
+			return nil, fmt.Errorf("NIRI_SOCKET not set and no niri socket found in XDG_RUNTIME_DIR")
+		}
+		path = matches[0]
 	}
 	homeDir := os.Getenv("HOME")
 	if homeDir == "" {
