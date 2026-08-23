@@ -137,7 +137,11 @@ func (g *LuaGenerator) GenerateAppearanceLua(config ipc.ConfigAppearance) string
 			b.WriteString("hl.animation({ leaf = \"windows\", enabled = true, speed = 2.5, bezier = \"myBezier\", style = \"popin 80%\" })\n")
 			b.WriteString("hl.animation({ leaf = \"border\", enabled = true, speed = 2.5, bezier = \"myBezier\" })\n")
 			b.WriteString("hl.animation({ leaf = \"fade\", enabled = true, speed = 2.5, bezier = \"myBezier\" })\n")
-			b.WriteString("hl.animation({ leaf = \"workspaces\", enabled = true, speed = 2.5, bezier = \"myBezier\", style = \"slidefade 20%\" })\n")
+			workspaceStyle := "slidefade 20%"
+			if config.Animations.WorkspaceStyle != nil && *config.Animations.WorkspaceStyle != "" {
+				workspaceStyle = *config.Animations.WorkspaceStyle
+			}
+			b.WriteString(fmt.Sprintf("hl.animation({ leaf = \"workspaces\", enabled = true, speed = 2.5, bezier = \"myBezier\", style = %q })\n", workspaceStyle))
 		}
 	}
 

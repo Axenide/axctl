@@ -160,7 +160,11 @@ func (g *Generator) GenerateAppearance(config ipc.ConfigAppearance) string {
 			out.WriteString("    animation = windows, 1, 2.5, myBezier, popin 80%\n")
 			out.WriteString("    animation = border, 1, 2.5, myBezier\n")
 			out.WriteString("    animation = fade, 1, 2.5, myBezier\n")
-			out.WriteString("    animation = workspaces, 1, 2.5, myBezier, slidefade 20%\n")
+			workspaceStyle := "slidefade 20%"
+			if config.Animations.WorkspaceStyle != nil && *config.Animations.WorkspaceStyle != "" {
+				workspaceStyle = *config.Animations.WorkspaceStyle
+			}
+			out.WriteString(fmt.Sprintf("    animation = workspaces, 1, 2.5, myBezier, %s\n", workspaceStyle))
 		}
 		out.WriteString("}\n")
 	}

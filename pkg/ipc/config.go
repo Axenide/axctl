@@ -40,7 +40,14 @@ type Shadow struct {
 
 // Animations config
 type Animations struct {
-	Enabled *bool `json:"enabled,omitempty"`
+	Enabled        *bool   `json:"enabled,omitempty"`
+	// WorkspaceStyle overrides the default 'slidefade 20%' used for
+	// the workspaces animation in the generated hyprland.{lua,conf}.
+	// Shell code (e.g. ambxst) computes this from the bar orientation:
+	// horizontal bar → vertical slide ('slidefadevert 20%'), vertical
+	// bar → horizontal slide ('slidefade 20%'). When nil, axctl uses
+	// 'slidefade 20%' to preserve prior behaviour.
+	WorkspaceStyle *string `json:"workspaceStyle,omitempty"`
 }
 
 // ConfigAppearance holds universal configuration for UI and layout

@@ -125,3 +125,57 @@ func TestLuaSectionsAreBannerFree(t *testing.T) {
 		t.Errorf("empty GenerateStartupLua leaked the banner:\n%s", got)
 	}
 }
+
+// Workspaces animation style defaults to slidefade, follows the
+// Animations.WorkspaceStyle override when set. Used by ambxst to
+// switch between slidefade (vertical bar) and slidefadevert
+// (horizontal bar) without a Timer-based live patch.
+func TestLuaAppearanceWorkspaceStyleDefault(t *testing.T) {
+	gen := NewLuaGenerator()
+	enabled := true
+	out := gen.GenerateAppearanceLua(ipc.ConfigAppearance{
+		Animations: &ipc.Animations{Enabled: &enabled},
+	})
+	if !strings.Contains(out, `leaf = "workspaces"`) {
+		t.Fatalf("missing workspaces animation, got:\n%s", out)
+	}
+	if !strings.Contains(out, `"slidefade 20%"`) {
+		t.Fatalf("expected default slidefade 20%% style, got:\n%s", out)
+	}
+	if strings.Contains(out, `slidefadevert`) {
+		t.Fatalf("unexpected slidefadevert with no WorkspaceStyle, got:\n%s", out)
+	}
+}
+
+func TestLuaAppearanceWorkspaceStyleOverride(t *testing.T) {
+	gen := NewLuaGenerator()
+	vert := "slidefadevert 20%"
+	enabled := true
+	out := gen.GenerateAppearanceLua(ipc.ConfigAppearance{
+		Animations: &ipc.Animations{
+			Enabled:        &enabled,
+			WorkspaceStyle: &vert,
+		},
+	})
+	if !strings.Contains(out, `"slidefadevert 20%"`) {
+		t.Fatalf("expected slidefadevert 20%% override, got:\n%s", out)
+	}
+	if strings.Contains(out, `"slidefade 20%"`) {
+		t.Fatalf("default slidefade leaked through with override set, got:\n%s", out)
+	}
+}
+
+func TestLuaAppearanceWorkspaceStyleEmptyFallsBack(t *testing.T) {
+	gen := NewLuaGenerator()
+	empty := ""
+	enabled := true
+	out := gen.GenerateAppearanceLua(ipc.ConfigAppearance{
+		Animations: &ipc.Animations{
+			Enabled:        &enabled,
+			WorkspaceStyle: &empty,
+		},
+	})
+	if !strings.Contains(out, `"slidefade 20%"`) {
+		t.Fatalf("empty WorkspaceStyle should fall back to default, got:\n%s", out)
+	}
+}
