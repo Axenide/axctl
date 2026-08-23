@@ -63,7 +63,32 @@ func (cw *ConfigWatcher) loop() {
 			if !ok {
 				return
 			}
-			// React to writes, creates, and renames (atomic saves use rename)
+
+			// fsnotify delivers IN_IGNORED implicitly when a watch
+			// descriptor becomes invalid — typical after the kernel
+			// reaps the inode following a rename or unlink, and for
+			// atomic-write patterns that put a new file in the same
+			// path. IN_IGNORED surfaces as fsnotify.Remove (Chmod
+			// events sometimes arrive here too on some kernels).
+			//
+			// Without re-adding the watch on these events, every
+			// subsequent change to the file is silently dropped.
+			if event.Op&fsnotify.Remove != 0 {
+				fmt.Printf("[axctl-config] Watch invalidated for %s (%s), re-registering\n", event.Name, event.Op)
+				cw.updateWatchedFiles()
+				// The change that invalidated the watch is itself a
+				// reason to reload — don't lose it just because the
+				// new watch hasn't caught the next event yet.
+				if debounceTimer != nil {
+					debounceTimer.Stop()
+				}
+				debounceTimer = time.AfterFunc(200*time.Millisecond, func() {
+					cw.reload()
+				})
+				continue
+			}
+
+			// React to writes, creates, and renames.
 			if event.Op&(fsnotify.Write|fsnotify.Create|fsnotify.Rename) == 0 {
 				continue
 			}
@@ -111,11 +136,13 @@ func (cw *ConfigWatcher) updateWatchedFiles() {
 
 	for _, p := range paths {
 		newWatched[p] = true
-		if !cw.watched[p] {
-			if err := cw.watcher.Add(p); err != nil {
-				// File might not exist yet — not an error
-				fmt.Printf("[axctl-config] Warning: cannot watch %s: %v\n", p, err)
-			}
+		// Always (re)add the watch. fsnotify.Add is cheap on an
+		// already-watched path and idempotent on a fresh inode, which
+		// means this also self-heals if the loop missed a Remove or
+		// Rename event (some filesystems and edge cases skip them).
+		if err := cw.watcher.Add(p); err != nil {
+			// File might not exist yet — not an error
+			fmt.Printf("[axctl-config] Warning: cannot watch %s: %v\n", p, err)
 		}
 	}
 
