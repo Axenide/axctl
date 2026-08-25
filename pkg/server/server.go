@@ -1096,6 +1096,24 @@ func (s *Server) handleConnection(conn net.Conn) {
 				break
 			}
 			err = s.compositor.SetKeyboardLayouts(p.Layouts, p.Variants)
+		case "Darkmode.On":
+			err = SetDarkMode(true)
+		case "Darkmode.Off":
+			err = SetDarkMode(false)
+		case "Darkmode.Toggle":
+			dark, derr := IsDarkMode()
+			if derr != nil {
+				err = derr
+				break
+			}
+			err = SetDarkMode(!dark)
+		case "Darkmode.Status":
+			dark, derr := IsDarkMode()
+			if derr != nil {
+				err = derr
+				break
+			}
+			result = map[string]bool{"dark": dark}
 		case "System.Subscribe":
 			s.clientsMu.Lock()
 			s.clients[conn] = struct{}{}
