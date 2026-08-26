@@ -276,13 +276,16 @@ func dispatcherToLua(dispatcher, arg string) string {
 		// window is visible at a time). Cycle through the window stack
 		// instead: up/right = next, down/left = prev. This keeps the
 		// same SUPER+Arrow keybinds working across all layouts.
+		// Scrolling must use the generic dispatcher: its layoutmsg focus
+		// never crosses monitors, while moveFocus falls back to the
+		// neighbor monitor (binds:window_direction_monitor_fallback).
 		cycle := "cyclenext"
 		if arg == "d" || arg == "l" {
 			cycle = "cycleprev"
 		}
 		return fmt.Sprintf(
-			"function() local layout = hl.get_active_workspace().tiled_layout; if layout == \"scrolling\" then hl.dispatch(hl.dsp.layout(%q)) elseif layout == \"monocle\" then hl.dispatch(hl.dsp.layout(%q)) else hl.dispatch(hl.dsp.focus({ direction = %q })) end end",
-			"focus "+arg, cycle, arg)
+			"function() local layout = hl.get_active_workspace().tiled_layout; if layout == \"monocle\" then hl.dispatch(hl.dsp.layout(%q)) else hl.dispatch(hl.dsp.focus({ direction = %q })) end end",
+			cycle, arg)
 	case "movewindow":
 		if arg == "" {
 			return "hl.dsp.window.drag()"

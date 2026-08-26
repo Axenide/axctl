@@ -16,10 +16,12 @@ func TestDispatcherToLuaMovefocusMonocle(t *testing.T) {
 		{
 			arg: "u",
 			wantAny: []string{
-				`layout == "scrolling"`,
 				`layout == "monocle"`,
 				`hl.dsp.layout("cyclenext")`,
 				`hl.dsp.focus({ direction = "u" })`,
+			},
+			wantNone: []string{
+				`hl.dsp.layout("focus u")`,
 			},
 		},
 		{
@@ -49,16 +51,23 @@ func TestDispatcherToLuaMovefocusMonocle(t *testing.T) {
 					t.Errorf("movefocus %q: missing %q in:\n%s", c.arg, want, lua)
 				}
 			}
+			for _, unwanted := range c.wantNone {
+				if strings.Contains(lua, unwanted) {
+					t.Errorf("movefocus %q: unexpected %q in:\n%s", c.arg, unwanted, lua)
+				}
+			}
 		})
 	}
 }
 
-func TestDispatcherToLuaMovefocusKeepsScrollingBranch(t *testing.T) {
-	// The original "focus <dir>" layoutmsg path for scrolling must
-	// remain intact after the monocle branch was added.
-	lua := dispatcherToLua("movefocus", "u")
-	if !strings.Contains(lua, `hl.dsp.layout("focus u")`) {
-		t.Errorf("scrolling branch lost; got:\n%s", lua)
+func TestDispatcherToLuaMovefocusDropsScrollingBranch(t *testing.T) {
+	// Scrolling must go through the generic dispatcher so focus can
+	// fall back to the neighbor monitor; layoutmsg focus never does.
+	for _, arg := range []string{"u", "d", "l", "r"} {
+		lua := dispatcherToLua("movefocus", arg)
+		if strings.Contains(lua, `hl.dsp.layout("focus `+arg+`")`) || strings.Contains(lua, `layout == "scrolling"`) {
+			t.Errorf("movefocus %q: scrolling layoutmsg branch still present:\n%s", arg, lua)
+		}
 	}
 }
 
