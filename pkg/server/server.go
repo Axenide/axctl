@@ -1114,6 +1114,110 @@ func (s *Server) handleConnection(conn net.Conn) {
 				break
 			}
 			result = map[string]bool{"dark": dark}
+
+		case "Brightness.List":
+			var p struct {
+				Monitor string `json:"monitor"`
+			}
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
+			if p.Monitor == "" {
+				result, err = ListBrightness()
+			} else {
+				targets, terr := resolveTargets(p.Monitor)
+				if terr != nil {
+					err = terr
+					break
+				}
+				result = targets
+			}
+		case "Brightness.Get":
+			var p struct {
+				Monitor string `json:"monitor"`
+			}
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
+			if p.Monitor == "" {
+				resp.Error = "monitor name is required"
+				break
+			}
+			v, gerr := GetBrightness(p.Monitor)
+			if gerr != nil {
+				err = gerr
+				break
+			}
+			result = map[string]float64{"brightness": v}
+		case "Brightness.Set":
+			var p struct {
+				Monitor string  `json:"monitor"`
+				Value   float64 `json:"value"`
+			}
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
+if p.Monitor == "" {
+			targets, lerr := ListBrightness()
+			if lerr != nil {
+				err = lerr
+				break
+			}
+			applied := false
+			for _, d := range targets {
+				if applyErr := applyTo(d, p.Value); applyErr == nil {
+					applied = true
+				}
+			}
+			if !applied {
+				resp.Error = "no monitors available"
+				break
+			}
+			s.broadcastBrightnessChange("", p.Value)
+			result = "ok"
+			break
+		}
+			if setErr := SetBrightness(p.Monitor, p.Value); setErr != nil {
+				err = setErr
+				break
+			}
+			s.broadcastBrightnessChange(p.Monitor, p.Value)
+		case "Brightness.Adjust":
+			var p struct {
+				Monitor string  `json:"monitor"`
+				Delta   float64 `json:"delta"`
+			}
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
+			if adjustErr := AdjustBrightness(p.Monitor, p.Delta); adjustErr != nil {
+				err = adjustErr
+				break
+			}
+			s.broadcastBrightnessChange(p.Monitor, p.Delta)
+		case "Brightness.Save":
+			var p struct {
+				Monitor string `json:"monitor"`
+			}
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
+			err = SaveBrightness(p.Monitor)
+		case "Brightness.Restore":
+			var p struct {
+				Monitor string `json:"monitor"`
+			}
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
+			err = RestoreBrightness(p.Monitor)
+
 		case "System.Subscribe":
 			s.clientsMu.Lock()
 			s.clients[conn] = struct{}{}
@@ -1200,4 +1304,12 @@ func (s *Server) handleIdleMonitorChanged(id uint32, isIdle bool) {
 		"is_idle": isIdle,
 	}
 	s.broadcastEvent("Event.IdleMonitorChanged", params)
+}
+
+func (s *Server) broadcastBrightnessChange(monitor string, value float64) {
+	params := map[string]interface{}{
+		"monitor": monitor,
+		"value":   value,
+	}
+	s.broadcastEvent("Event.BrightnessChanged", params)
 }

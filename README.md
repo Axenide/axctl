@@ -141,6 +141,30 @@ axctl system is-idle <ms>
 axctl system get-capabilities
 ```
 
+### Brightness
+
+Manage backlight (internal panels via `brightnessctl`) and external monitors
+(via `ddcutil` over DDC/CI). Values are always in the normalized 0..1 range
+unless otherwise noted.
+
+```bash
+axctl brightness list                  # all devices, with current 0..1
+axctl brightness get <monitor>         # read one device's brightness
+axctl brightness set <monitor> <0..1>  # set one device, or omit for all
+axctl brightness adjust <monitor> <+/-0..1>
+axctl brightness save [monitor]        # snapshot to XDG state dir
+axctl brightness restore [monitor]     # reapply saved values
+```
+
+Device names follow the convention `backlight-<kernel-dev>` for internal
+laptop panels (e.g. `backlight-intel_backlight`, `backlight-amdgpu_bl1`) and
+`ddc-<bus>` for external displays (e.g. `ddc-3` for `/dev/i2c-3`). Pass
+`backlight` to address every internal panel at once. Saved values persist
+across reboots in `$XDG_CONFIG_HOME/axctl/brightness.tsv`.
+
+Successful `set`/`adjust` calls emit an `Event.BrightnessChanged`
+notification on the subscribe channel with `{monitor, value}`.
+
 ### Notes on IDs
 
 Window, workspace, and monitor IDs are compositor-defined. Treat them as

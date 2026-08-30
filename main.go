@@ -55,7 +55,7 @@ func main() {
 		runDaemon(customConfigPath)
 	case "subscribe":
 		runSubscribe()
-	case "window", "workspace", "monitor", "layout", "config", "system", "darkmode":
+	case "window", "workspace", "monitor", "layout", "config", "system", "darkmode", "brightness":
 		if len(remainingArgs) < 2 {
 			usage()
 			return
@@ -167,6 +167,13 @@ func usage() {
 	fmt.Println("    off                     Set system color-scheme to prefer-light")
 	fmt.Println("    toggle                  Toggle dark/light color-scheme")
 	fmt.Println("    status                  Show current color-scheme state")
+	fmt.Println("\n  brightness <action> [args]")
+	fmt.Println("    list [monitor]          List brightness devices (0..1 if known)")
+	fmt.Println("    get <monitor>           Get current brightness for one device")
+	fmt.Println("    set <monitor> <0..1>    Set brightness (0..1) for one device or all")
+	fmt.Println("    adjust <monitor> <+/-0..1> Adjust brightness by delta")
+	fmt.Println("    save [monitor]          Save current brightness to XDG state")
+	fmt.Println("    restore [monitor]       Restore previously saved brightness")
 }
 
 func socketExists(path string) bool {
@@ -174,6 +181,16 @@ func socketExists(path string) bool {
 		return true
 	}
 	return false
+}
+
+// defaultSocketPath returns the conventional per-user socket path.
+// Tests and operators can override the location with AXCTL_SOCKET to
+// point the client at an alternative daemon without touching /tmp.
+func defaultSocketPath() string {
+	if p := os.Getenv("AXCTL_SOCKET"); p != "" {
+		return p
+	}
+	return fmt.Sprintf("/tmp/axctl-%d.sock", os.Getuid())
 }
 
 func findLatestSocket(pattern string) string {
@@ -239,7 +256,7 @@ func runDaemon(customConfigPath string) {
 	fmt.Printf("Detected compositor: %T\n", comp)
 	fmt.Println("Creating server...")
 
-	socketPath := fmt.Sprintf("/tmp/axctl-%d.sock", os.Getuid())
+	socketPath := defaultSocketPath()
 
 	// Single instance check
 	if conn, err := net.Dial("unix", socketPath); err == nil {
@@ -307,7 +324,7 @@ func runDaemon(customConfigPath string) {
 }
 
 func runSubscribe() {
-	socketPath := fmt.Sprintf("/tmp/axctl-%d.sock", os.Getuid())
+	socketPath := defaultSocketPath()
 	conn, err := net.Dial("unix", socketPath)
 	if err != nil {
 		fmt.Printf("Error connecting to daemon: %v\n", err)
@@ -625,9 +642,61 @@ func handleRPC(category string, args []string) {
 		// No args needed - exits the compositor
 	case "Darkmode.On", "Darkmode.Off", "Darkmode.Toggle", "Darkmode.Status":
 		// No args needed
+	case "Brightness.List":
+		if len(args) > 1 {
+			params["monitor"] = args[1]
+		}
+	case "Brightness.Get":
+		if len(args) > 1 {
+			params["monitor"] = args[1]
+		}
+	case "Brightness.Set":
+		if len(args) > 2 {
+			params["monitor"] = args[1]
+			var v float64
+			if _, scanErr := fmt.Sscanf(args[2], "%f", &v); scanErr != nil {
+				fmt.Printf("Error: invalid brightness value %q (expected 0..1)\n", args[2])
+				return
+			}
+			params["value"] = v
+		} else if len(args) > 1 {
+			var v float64
+			if _, scanErr := fmt.Sscanf(args[1], "%f", &v); scanErr != nil {
+				fmt.Printf("Error: invalid brightness value %q (expected 0..1)\n", args[1])
+				return
+			}
+			params["monitor"] = ""
+			params["value"] = v
+		}
+	case "Brightness.Adjust":
+		if len(args) > 2 {
+			params["monitor"] = args[1]
+			var d float64
+			if _, scanErr := fmt.Sscanf(args[2], "%f", &d); scanErr != nil {
+				fmt.Printf("Error: invalid delta %q\n", args[2])
+				return
+			}
+			params["delta"] = d
+		} else if len(args) > 1 {
+			var d float64
+			if _, scanErr := fmt.Sscanf(args[1], "%f", &d); scanErr != nil {
+				fmt.Printf("Error: invalid delta %q\n", args[1])
+				return
+			}
+			params["monitor"] = ""
+			params["delta"] = d
+		}
+	case "Brightness.Save":
+		if len(args) > 1 {
+			params["monitor"] = args[1]
+		}
+	case "Brightness.Restore":
+		if len(args) > 1 {
+			params["monitor"] = args[1]
+		}
 	}
 
-	socketPath := fmt.Sprintf("/tmp/axctl-%d.sock", os.Getuid())
+	socketPath := defaultSocketPath()
 	conn, err := net.Dial("unix", socketPath)
 	if err != nil {
 		fmt.Printf("Error connecting to daemon: %v\n", err)
