@@ -173,7 +173,10 @@ func (g *LuaGenerator) GenerateKeybindsLua(config ipc.ConfigKeybinds) string {
 		}
 
 		if dispatcher == "" || dispatcher == "exec" {
-			if arg != "" {
+			flags := bindFlagsToLua(kb.Flags)
+			if flags != "" {
+				b.WriteString(fmt.Sprintf("hl.bind(%s, hl.dsp.exec_cmd(%q), { %s })\n", luaQuote(keyStr), arg, flags))
+			} else if arg != "" {
 				b.WriteString(fmt.Sprintf("hl.bind(%s, hl.dsp.exec_cmd(%q))\n", luaQuote(keyStr), arg))
 			} else {
 				b.WriteString(fmt.Sprintf("hl.bind(%s, hl.dsp.exec_cmd(%q))\n", luaQuote(keyStr), ""))
