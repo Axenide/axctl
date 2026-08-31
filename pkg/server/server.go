@@ -1151,7 +1151,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 				break
 			}
 			result = map[string]float64{"brightness": v}
-		case "Brightness.Set":
+case "Brightness.Set":
 			var p struct {
 				Monitor string  `json:"monitor"`
 				Value   float64 `json:"value"`
@@ -1160,31 +1160,38 @@ func (s *Server) handleConnection(conn net.Conn) {
 				resp.Error = fmt.Sprintf("invalid params: %v", err)
 				break
 			}
-if p.Monitor == "" {
-			targets, lerr := ListBrightness()
-			if lerr != nil {
-				err = lerr
-				break
-			}
-			applied := false
-			for _, d := range targets {
-				if applyErr := applyTo(d, p.Value); applyErr == nil {
-					applied = true
+			if p.Monitor == "" {
+				targets, lerr := ListBrightness()
+				if lerr != nil {
+					err = lerr
+					break
 				}
-			}
-			if !applied {
-				resp.Error = "no monitors available"
+				applied := false
+				for _, d := range targets {
+					if applyErr := applyTo(d, p.Value); applyErr == nil {
+						applied = true
+						if cur, ok := readBroadcastValue(d); ok {
+							s.broadcastBrightnessChange(MonitorKey(d), cur)
+						}
+					}
+				}
+				if !applied {
+					resp.Error = "no monitors available"
+					break
+				}
+				result = "ok"
 				break
 			}
-			s.broadcastBrightnessChange("", p.Value)
-			result = "ok"
-			break
-		}
 			if setErr := SetBrightness(p.Monitor, p.Value); setErr != nil {
 				err = setErr
 				break
 			}
-			s.broadcastBrightnessChange(p.Monitor, p.Value)
+			targets, _ := resolveTargets(p.Monitor)
+			for _, d := range targets {
+				if cur, ok := readBroadcastValue(d); ok {
+					s.broadcastBrightnessChange(MonitorKey(d), cur)
+				}
+			}
 		case "Brightness.Adjust":
 			var p struct {
 				Monitor string  `json:"monitor"`
@@ -1198,7 +1205,14 @@ if p.Monitor == "" {
 				err = adjustErr
 				break
 			}
-			s.broadcastBrightnessChange(p.Monitor, p.Delta)
+			// Broadcast per-device with the actual post-apply value, not the
+			// raw delta, so subscribers can treat value as absolute.
+			targets, _ := resolveTargets(p.Monitor)
+			for _, d := range targets {
+				if cur, ok := readBroadcastValue(d); ok {
+					s.broadcastBrightnessChange(MonitorKey(d), cur)
+				}
+			}
 		case "Brightness.Save":
 			var p struct {
 				Monitor string `json:"monitor"`

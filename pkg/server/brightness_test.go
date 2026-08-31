@@ -16,8 +16,8 @@ func TestParseSysBacklight(t *testing.T) {
 		t.Fatalf("expected 2 devices, got %d", len(got))
 	}
 	want := []Device{
-		{Name: "backlight-amdgpu_bl1", Kind: "brightnessctl"},
-		{Name: "backlight-intel_backlight", Kind: "brightnessctl"},
+		{Name: "backlight-amdgpu_bl1", Key: "backlight", Kind: "brightnessctl"},
+		{Name: "backlight-intel_backlight", Key: "backlight", Kind: "brightnessctl"},
 	}
 	for i := range want {
 		if got[i] != want[i] {
@@ -46,8 +46,8 @@ Display 2
 		t.Fatalf("expected 2 displays, got %d", len(got))
 	}
 	want := []Device{
-		{Name: "ddc-3", Kind: "ddcutil", Bus: "3"},
-		{Name: "ddc-4", Kind: "ddcutil", Bus: "4"},
+		{Name: "ddc-3", Key: "ddc-3", Kind: "ddcutil", Bus: "3"},
+		{Name: "ddc-4", Key: "ddc-4", Kind: "ddcutil", Bus: "4"},
 	}
 	for i := range want {
 		if got[i] != want[i] {

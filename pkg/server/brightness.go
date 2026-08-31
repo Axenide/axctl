@@ -15,11 +15,31 @@ import (
 // (laptop screens, identified by /sys/class/backlight/<dev>) report
 // Kind="brightnessctl". External displays reached over DDC/CI report
 // Kind="ddcutil" with a numeric Bus (the /dev/i2c-N index).
+//
+// Name preserves the historical kernel-derived identifier
+// (e.g. "backlight-amdgpu_bl1") for back-compat with scripts and tests.
+// Key is the canonical monitor identifier used for event broadcasts and
+// matches what the QML front-end keys its monitors by: "backlight" for
+// any internal panel, "ddc-<bus>" for an external DDC display.
 type Device struct {
 	Name       string   `json:"name"`
+	Key        string   `json:"key,omitempty"`
 	Kind       string   `json:"kind"`
 	Bus        string   `json:"bus,omitempty"`
 	Brightness *float64 `json:"brightness,omitempty"`
+}
+
+// MonitorKey returns the canonical monitor identifier for a Device.
+// Used by the server to emit Event.BrightnessChanged with a key that
+// the QML front-end can match against its BrightnessMonitor entries.
+func MonitorKey(d Device) string {
+	if d.Key != "" {
+		return d.Key
+	}
+	if d.Kind == "ddcutil" {
+		return "ddc-" + d.Bus
+	}
+	return "backlight"
 }
 
 // ddcVCPRe parses the current/max brightness fields emitted by
@@ -33,7 +53,11 @@ func parseSysBacklight(out string) []Device {
 		if name == "" {
 			continue
 		}
-		devs = append(devs, Device{Name: "backlight-" + name, Kind: "brightnessctl"})
+		devs = append(devs, Device{
+			Name: "backlight-" + name,
+			Key:  "backlight",
+			Kind: "brightnessctl",
+		})
 	}
 	return devs
 }
@@ -55,7 +79,12 @@ func parseDDCDetect(out string) []Device {
 			}
 		}
 		if bus != "" {
-			devs = append(devs, Device{Name: "ddc-" + bus, Kind: "ddcutil", Bus: bus})
+			devs = append(devs, Device{
+				Name: "ddc-" + bus,
+				Key:  "ddc-" + bus,
+				Kind: "ddcutil",
+				Bus:  bus,
+			})
 		}
 	}
 	return devs
@@ -202,6 +231,17 @@ func currentOf(d Device) (*float64, error) {
 	default:
 		return nil, fmt.Errorf("unknown kind %q", d.Kind)
 	}
+}
+
+// readBroadcastValue returns the post-apply current normalized value of
+// d, falling back gracefully when the read fails so the broadcast can
+// be skipped rather than emitting a stale or wrong value.
+func readBroadcastValue(d Device) (float64, bool) {
+	v, err := currentOf(d)
+	if err != nil || v == nil {
+		return 0, false
+	}
+	return *v, true
 }
 
 // brightnessSaveFile lives under XDG state (UserConfigDir on Linux) so
