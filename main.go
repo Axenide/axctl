@@ -184,11 +184,16 @@ func socketExists(path string) bool {
 }
 
 // defaultSocketPath returns the conventional per-user socket path.
-// Tests and operators can override the location with AXCTL_SOCKET to
-// point the client at an alternative daemon without touching /tmp.
+// XDG_RUNTIME_DIR (/run/user/<uid>, mode 0700) keeps the socket out of the
+// shared /tmp namespace, where a second local account could squat the path
+// and either block the daemon or impersonate it. Tests and operators can
+// override the location with AXCTL_SOCKET.
 func defaultSocketPath() string {
 	if p := os.Getenv("AXCTL_SOCKET"); p != "" {
 		return p
+	}
+	if runtime := os.Getenv("XDG_RUNTIME_DIR"); runtime != "" {
+		return filepath.Join(runtime, "axctl.sock")
 	}
 	return fmt.Sprintf("/tmp/axctl-%d.sock", os.Getuid())
 }
@@ -264,7 +269,9 @@ func runDaemon(customConfigPath string) {
 		fmt.Println("Error: axctl daemon is already running.")
 		os.Exit(1)
 	}
-	os.Remove(socketPath) // Clean up stale socket if daemon is not running
+	if err := os.Remove(socketPath); err != nil && !os.IsNotExist(err) {
+		fmt.Printf("Warning: could not remove stale socket %s: %v\n", socketPath, err)
+	}
 
 	srv := server.New(comp, socketPath)
 

@@ -338,6 +338,10 @@ func (s *Server) resolveID(id string) (string, error) {
 
 func (s *Server) handleConnection(conn net.Conn) {
 	defer conn.Close()
+	if err := verifyPeerUID(conn); err != nil {
+		fmt.Printf("[axctl] rejected connection: %v\n", err)
+		return
+	}
 	defer func() {
 		s.clientsMu.Lock()
 		delete(s.clients, conn)
