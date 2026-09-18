@@ -35,19 +35,55 @@ const (
 	eviocgbitKey  = 0xC0604521
 )
 
+// Status is a snapshot of the monitor state for introspection.
+type Status struct {
+	Open    bool              `json:"open"`
+	Binds   map[string]string `json:"binds"`
+	Devices []string          `json:"devices"`
+	Errors  map[string]string `json:"errors"`
+}
+
 // Monitor observes evdev devices and fires registered commands when a
 // modifier is pressed and released alone. Device watching starts lazily on
 // the first SetBinds call and readers run for the daemon's lifetime; binds
 // can be swapped at any time.
 type Monitor struct {
-	mu     sync.Mutex
-	binds  map[string]string
-	open   bool
-	warned bool
+	mu       sync.Mutex
+	binds    map[string]string
+	open     bool
+	warned   bool
+	devices  map[string]bool
+	errors   map[string]string
 }
 
 func NewMonitor() *Monitor {
-	return &Monitor{binds: map[string]string{}}
+	return &Monitor{
+		binds:   map[string]string{},
+		devices: map[string]bool{},
+		errors:  map[string]string{},
+	}
+}
+
+// Status returns the current monitor state for debugging.
+func (m *Monitor) Status() Status {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	st := Status{
+		Open:    m.open,
+		Binds:   make(map[string]string, len(m.binds)),
+		Devices: make([]string, 0, len(m.devices)),
+		Errors:  make(map[string]string, len(m.errors)),
+	}
+	for k, v := range m.binds {
+		st.Binds[k] = v
+	}
+	for path := range m.devices {
+		st.Devices = append(st.Devices, path)
+	}
+	for k, v := range m.errors {
+		st.Errors[k] = v
+	}
+	return st
 }
 
 // SetBinds replaces the modifier-alone commands (group → shell command).
@@ -67,9 +103,13 @@ func (m *Monitor) SetBinds(binds map[string]string) {
 	if !needOpen {
 		return
 	}
-	opened := m.openDevices()
+	opened, devices, errs := m.openDevices()
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.errors = errs
+	for _, path := range devices {
+		m.devices[path] = true
+	}
 	if opened {
 		m.open = true
 	} else if !m.warned {
@@ -90,26 +130,33 @@ func (m *Monitor) currentBinds() map[string]string {
 }
 
 // openDevices opens every keyboard-like evdev device and starts a reader
-// goroutine per device. It reports whether at least one device was opened.
-func (m *Monitor) openDevices() bool {
+// goroutine per device. It returns whether at least one device was opened,
+// the opened paths, and per-device errors for introspection.
+func (m *Monitor) openDevices() (bool, []string, map[string]string) {
+	errs := map[string]string{}
 	matches, err := filepath.Glob("/dev/input/event*")
 	if err != nil {
-		return false
+		errs["glob"] = err.Error()
+		return false, nil, errs
 	}
 	opened := false
+	devices := []string{}
 	for _, path := range matches {
 		fd, err := unix.Open(path, unix.O_RDONLY, 0)
 		if err != nil {
+			errs[path] = fmt.Sprintf("open: %v", err)
 			continue
 		}
 		if !isKeyboard(uintptr(fd)) {
 			unix.Close(fd)
+			errs[path] = "not a keyboard (no EV_KEY letters/modifiers)"
 			continue
 		}
+		devices = append(devices, path)
 		opened = true
 		go m.readLoop(path, fd)
 	}
-	return opened
+	return opened, devices, errs
 }
 
 // isKeyboard reports whether the fd has EV_KEY capability and at least one
@@ -152,6 +199,7 @@ func ioctlBit(fd uintptr, req uint, buf []byte) error {
 }
 
 // readLoop consumes evdev events from one device until the fd errors out.
+// On failure it marks the device gone in the monitor state.
 func (m *Monitor) readLoop(path string, fd int) {
 	defer unix.Close(fd)
 	machine := NewMachine()
@@ -162,6 +210,10 @@ func (m *Monitor) readLoop(path string, fd int) {
 			if err == syscall.EINTR {
 				continue
 			}
+			m.mu.Lock()
+			delete(m.devices, path)
+			m.errors[path] = fmt.Sprintf("read: %v", err)
+			m.mu.Unlock()
 			fmt.Printf("keymon: %s reader stopped: %v\n", path, err)
 			return
 		}
