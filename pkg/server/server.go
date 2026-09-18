@@ -829,9 +829,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 				result = caps
 			}
 		case "System.GetCompositor":
-			// Object shape for consistency with the rest of the RPC
-			// surface (window.active returns {"id": ...}).
-			result = map[string]string{"compositor": s.compositorName()}
+			result = s.compositorName()
 		case "System.KeymonStatus":
 			result = s.keyMon.Status()
 		case "System.IdleInhibit":

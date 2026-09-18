@@ -154,13 +154,11 @@ func TestSystemGetCompositorDispatch(t *testing.T) {
 	if errString != "" {
 		t.Fatalf("System.GetCompositor error = %q", errString)
 	}
-	var out struct {
-		Compositor string `json:"compositor"`
-	}
-	if err := json.Unmarshal(result, &out); err != nil {
+	var name string
+	if err := json.Unmarshal(result, &name); err != nil {
 		t.Fatalf("unmarshal result: %v (%s)", err, string(result))
 	}
-	if out.Compositor == "" {
-		t.Fatalf("compositor name = %q, want non-empty", out.Compositor)
+	if name == "" {
+		t.Fatalf("compositor name = %q, want non-empty", name)
 	}
 }

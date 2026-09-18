@@ -737,8 +737,13 @@ func handleRPC(category string, args []string) {
 		return
 	}
 
-	if s, ok := resp.Result.(string); ok && s == "ok" {
-		fmt.Println("Success")
+	if s, ok := resp.Result.(string); ok {
+		if s == "ok" {
+			fmt.Println("Success")
+		} else {
+			// Scalar string results print bare, without JSON quotes.
+			fmt.Println(s)
+		}
 		return
 	}
 
