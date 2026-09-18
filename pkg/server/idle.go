@@ -15,6 +15,8 @@ import (
 	"axctl/pkg/ipc/wayland/client"
 	"axctl/pkg/ipc/wayland/ext_idle_notify_v1"
 	"axctl/pkg/ipc/wayland/idle_inhibit_v1"
+	"axctl/pkg/ipc/wayland/layershell"
+	"golang.org/x/sys/unix"
 )
 
 type IdleManager struct {
@@ -23,6 +25,8 @@ type IdleManager struct {
 	seat         *client.Seat
 	notifier     *ext_idle_notify_v1.ExtIdleNotifierV1
 	inhibitorMgr *idle_inhibit_v1.ZwpIdleInhibitManagerV1
+	layerShell   *layershell.ZwlrLayerShellV1
+	shm          *client.Shm
 
 	mu   sync.Mutex
 	wlMu sync.Mutex // Protects Wayland socket writes
@@ -56,6 +60,16 @@ type idleInhibitor struct {
 	deleted   bool
 	inhibitor *idle_inhibit_v1.ZwpIdleInhibitorV1
 	surface   *client.Surface
+
+	// Mapped layer-shell surface state. Niri only honors inhibitors of
+	// visible surfaces, so the inhibitor surface is mapped as a 1x1
+	// transparent overlay layer surface. nil when layer shell is not
+	// available and the bare-surface fallback is in use.
+	layerSurf *layershell.ZwlrLayerSurfaceV1
+	buffer    *client.Buffer
+	pool      *client.ShmPool
+	region    *client.Region
+	shmFd     int
 }
 
 type systemInhibitor struct {
@@ -100,6 +114,8 @@ func (im *IdleManager) connectWayland() error {
 	im.seat = nil
 	im.notifier = nil
 	im.inhibitorMgr = nil
+	im.layerShell = nil
+	im.shm = nil
 
 	registry.SetGlobalHandler(func(e client.RegistryGlobalEvent) {
 		switch e.Interface {
@@ -109,6 +125,9 @@ func (im *IdleManager) connectWayland() error {
 		case "wl_seat":
 			im.seat = client.NewSeat(display.Context())
 			registry.Bind(e.Name, e.Interface, 1, im.seat)
+		case "wl_shm":
+			im.shm = client.NewShm(display.Context())
+			registry.Bind(e.Name, e.Interface, 1, im.shm)
 		case "ext_idle_notifier_v1":
 			im.notifier = ext_idle_notify_v1.NewExtIdleNotifierV1(display.Context())
 			ver := e.Version
@@ -119,6 +138,13 @@ func (im *IdleManager) connectWayland() error {
 		case "zwp_idle_inhibit_manager_v1":
 			im.inhibitorMgr = idle_inhibit_v1.NewZwpIdleInhibitManagerV1(display.Context())
 			registry.Bind(e.Name, e.Interface, 1, im.inhibitorMgr)
+		case "zwlr_layer_shell_v1":
+			ver := e.Version
+			if ver > 4 {
+				ver = 4
+			}
+			im.layerShell = layershell.NewZwlrLayerShellV1(display.Context())
+			registry.Bind(e.Name, e.Interface, ver, im.layerShell)
 		}
 	})
 
@@ -157,6 +183,11 @@ func (im *IdleManager) invalidateStaleProxies() {
 	for _, inh := range im.inhibitors {
 		inh.inhibitor = nil
 		inh.surface = nil
+		inh.layerSurf = nil
+		inh.buffer = nil
+		inh.pool = nil
+		inh.region = nil
+		inh.shmFd = 0
 	}
 }
 
@@ -722,6 +753,167 @@ func (im *IdleManager) DestroyIdleInhibitor(id uint32) error {
 	return nil
 }
 
+// destroyInhibitorSurfaceState tears down the visible surface state
+// attached to an inhibitor. Callers must hold im.wlMu.
+func (im *IdleManager) destroyInhibitorSurfaceState(inh *idleInhibitor) {
+	if inh.layerSurf != nil {
+		inh.layerSurf.Destroy()
+		inh.layerSurf = nil
+	}
+	if inh.buffer != nil {
+		inh.buffer.Destroy()
+		inh.buffer = nil
+	}
+	if inh.pool != nil {
+		inh.pool.Destroy()
+		inh.pool = nil
+	}
+	if inh.region != nil {
+		inh.region.Destroy()
+		inh.region = nil
+	}
+	if inh.surface != nil {
+		inh.surface.Destroy()
+		inh.surface = nil
+	}
+}
+
+// mapInhibitorSurface maps surface as a visible 1x1 fully transparent
+// overlay layer surface. Compositors that follow the idle-inhibit spec
+// (niri, sway) only honor inhibitors attached to surfaces that are
+// actually visible on an output, so a bare wl_surface is silently
+// ignored there. The 1x1 transparent overlay is rendered (hence
+// "visible") without reserving space, stealing input, or showing up in
+// window lists.
+//
+// The surface commits once without a buffer to receive the initial
+// configure, then acks it and commits the transparent buffer. All socket
+// writes are serialized internally with im.wlMu; the caller must NOT
+// hold im.wlMu (it is released while waiting for the configure event so
+// the dispatch loop can process it).
+func (im *IdleManager) mapInhibitorSurface(surface *client.Surface) (*layershell.ZwlrLayerSurfaceV1, *client.Buffer, *client.ShmPool, *client.Region, error) {
+	im.wlMu.Lock()
+
+	ls, err := im.layerShell.GetLayerSurface(surface, nil, uint32(layershell.ZwlrLayerShellV1LayerOverlay), "axctl-idle-inhibit")
+	if err != nil {
+		im.wlMu.Unlock()
+		return nil, nil, nil, nil, err
+	}
+
+	if err := ls.SetSize(1, 1); err != nil {
+		ls.Destroy()
+		im.wlMu.Unlock()
+		return nil, nil, nil, nil, err
+	}
+	anchor := uint32(layershell.ZwlrLayerSurfaceV1AnchorTop | layershell.ZwlrLayerSurfaceV1AnchorLeft)
+	if err := ls.SetAnchor(anchor); err != nil {
+		ls.Destroy()
+		im.wlMu.Unlock()
+		return nil, nil, nil, nil, err
+	}
+	if err := ls.SetExclusiveZone(-1); err != nil {
+		ls.Destroy()
+		im.wlMu.Unlock()
+		return nil, nil, nil, nil, err
+	}
+	_ = ls.SetMargin(0, 0, 0, 0)
+	_ = ls.SetKeyboardInteractivity(0)
+
+	var region *client.Region
+	if r, rerr := im.compositor.CreateRegion(); rerr == nil {
+		region = r
+		_ = surface.SetInputRegion(region)
+	}
+
+	fd, ferr := unix.MemfdCreate("axctl-idle-inhibit", 0)
+	if ferr != nil {
+		ls.Destroy()
+		if region != nil {
+			region.Destroy()
+		}
+		im.wlMu.Unlock()
+		return nil, nil, nil, nil, fmt.Errorf("memfd create failed: %w", ferr)
+	}
+	if terr := unix.Ftruncate(fd, 4); terr != nil {
+		unix.Close(fd)
+		ls.Destroy()
+		if region != nil {
+			region.Destroy()
+		}
+		im.wlMu.Unlock()
+		return nil, nil, nil, nil, fmt.Errorf("ftruncate failed: %w", terr)
+	}
+
+	pool, perr := im.shm.CreatePool(fd, 4)
+	// The fd was dup'ed into the compositor via SCM_RIGHTS; close ours.
+	unix.Close(fd)
+	if perr != nil {
+		ls.Destroy()
+		if region != nil {
+			region.Destroy()
+		}
+		im.wlMu.Unlock()
+		return nil, nil, nil, nil, fmt.Errorf("shm pool create failed: %w", perr)
+	}
+
+	// Fresh memfd memory is zero-filled: a 1x1 fully transparent ARGB pixel.
+	buffer, berr := pool.CreateBuffer(0, 1, 1, 4, uint32(client.ShmFormatArgb8888))
+	if berr != nil {
+		pool.Destroy()
+		ls.Destroy()
+		if region != nil {
+			region.Destroy()
+		}
+		im.wlMu.Unlock()
+		return nil, nil, nil, nil, fmt.Errorf("shm buffer create failed: %w", berr)
+	}
+
+	mapped := make(chan struct{})
+	var mapOnce sync.Once
+	ls.SetConfigureHandler(func(e layershell.ZwlrLayerSurfaceV1ConfigureEvent) {
+		mapOnce.Do(func() {
+			im.wlMu.Lock()
+			_ = ls.AckConfigure(e.Serial)
+			_ = surface.Attach(buffer, 0, 0)
+			_ = surface.Commit()
+			im.wlMu.Unlock()
+			close(mapped)
+		})
+	})
+
+	// Empty commit: asks the compositor for the initial configure.
+	if cerr := surface.Commit(); cerr != nil {
+		buffer.Destroy()
+		pool.Destroy()
+		ls.Destroy()
+		if region != nil {
+			region.Destroy()
+		}
+		im.wlMu.Unlock()
+		return nil, nil, nil, nil, fmt.Errorf("surface commit failed: %w", cerr)
+	}
+
+	// The configure event is dispatched by the background dispatch loop,
+	// so the lock must not be held while waiting.
+	im.wlMu.Unlock()
+
+	select {
+	case <-mapped:
+	case <-time.After(2 * time.Second):
+		im.wlMu.Lock()
+		buffer.Destroy()
+		pool.Destroy()
+		ls.Destroy()
+		if region != nil {
+			region.Destroy()
+		}
+		im.wlMu.Unlock()
+		return nil, nil, nil, nil, fmt.Errorf("timeout waiting for layer surface configure")
+	}
+
+	return ls, buffer, pool, region, nil
+}
+
 func (im *IdleManager) setInhibitorEnabledLocked(inh *idleInhibitor, enabled bool) error {
 	if !enabled {
 		im.wlMu.Lock()
@@ -729,10 +921,7 @@ func (im *IdleManager) setInhibitorEnabledLocked(inh *idleInhibitor, enabled boo
 			inh.inhibitor.Destroy()
 			inh.inhibitor = nil
 		}
-		if inh.surface != nil {
-			inh.surface.Destroy()
-			inh.surface = nil
-		}
+		im.destroyInhibitorSurfaceState(inh)
 		im.wlMu.Unlock()
 		return nil
 	}
@@ -746,6 +935,10 @@ func (im *IdleManager) setInhibitorEnabledLocked(inh *idleInhibitor, enabled boo
 	// synchronously and retry. After invalidateStaleProxies during
 	// reconnect, any prior proxies are already nil.
 	var surface *client.Surface
+	var layerSurf *layershell.ZwlrLayerSurfaceV1
+	var buffer *client.Buffer
+	var pool *client.ShmPool
+	var region *client.Region
 	var inhibitor *idle_inhibit_v1.ZwpIdleInhibitorV1
 	var err error
 	for attempt := 0; attempt < 2; attempt++ {
@@ -755,17 +948,31 @@ func (im *IdleManager) setInhibitorEnabledLocked(inh *idleInhibitor, enabled boo
 		}
 		im.wlMu.Lock()
 		surface, _ = im.compositor.CreateSurface()
+		im.wlMu.Unlock()
+		if surface == nil {
+			err = fmt.Errorf("failed to create wl_surface")
+			break
+		}
+		if im.layerShell != nil && im.shm != nil {
+			// Mapping failures are non-fatal: fall back to the bare
+			// surface so compositors that honor unattached inhibitors
+			// (Hyprland) keep working.
+			layerSurf, buffer, pool, region, err = im.mapInhibitorSurface(surface)
+			if err != nil {
+				layerSurf, buffer, pool, region = nil, nil, nil, nil
+			}
+		}
+		im.wlMu.Lock()
 		inhibitor, err = im.inhibitorMgr.CreateInhibitor(surface)
 		im.wlMu.Unlock()
 		if err == nil {
 			break
 		}
-		if surface != nil {
-			im.wlMu.Lock()
-			surface.Destroy()
-			im.wlMu.Unlock()
-			surface = nil
-		}
+		stale := &idleInhibitor{surface: surface, layerSurf: layerSurf, buffer: buffer, pool: pool, region: region}
+		im.wlMu.Lock()
+		im.destroyInhibitorSurfaceState(stale)
+		im.wlMu.Unlock()
+		surface, layerSurf, buffer, pool, region = nil, nil, nil, nil, nil
 		if !isBrokenPipeErr(err) || attempt == 1 {
 			break
 		}
@@ -778,6 +985,10 @@ func (im *IdleManager) setInhibitorEnabledLocked(inh *idleInhibitor, enabled boo
 		return err
 	}
 	inh.surface = surface
+	inh.layerSurf = layerSurf
+	inh.buffer = buffer
+	inh.pool = pool
+	inh.region = region
 	inh.inhibitor = inhibitor
 	return nil
 }
