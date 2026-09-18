@@ -97,3 +97,35 @@ func TestBrightnessGetRequiresMonitor(t *testing.T) {
 		t.Errorf("Brightness.Get without monitor should error")
 	}
 }
+
+func TestOverviewToggleDispatch(t *testing.T) {
+	mockComp := mock.NewCompositor()
+	socketPath := filepath.Join(t.TempDir(), "axctl-test.sock")
+	srv := New(mockComp, socketPath)
+	go srv.Start()
+	defer func() {
+		_ = os.Remove(socketPath)
+	}()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if _, statErr := os.Stat(socketPath); statErr == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("test server did not start")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	result, errString := dispatch(t, socketPath, "Overview.Toggle", map[string]interface{}{})
+	if errString != "" {
+		t.Fatalf("Overview.Toggle error = %q", errString)
+	}
+	if result != nil && string(result) != "null" && string(result) != `"ok"` {
+		t.Fatalf("unexpected result: %s", string(result))
+	}
+	if got := mockComp.ToggleOverviewCalls(); got != 1 {
+		t.Fatalf("ToggleOverviewCalls = %d, want 1", got)
+	}
+}

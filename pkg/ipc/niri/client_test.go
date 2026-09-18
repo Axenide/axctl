@@ -998,3 +998,16 @@ func TestListMonitorsFocusAndActiveWorkspace(t *testing.T) {
 		t.Fatalf("HDMI-A-1 active_workspace = %v, want 5", hdmi.Metadata["active_workspace"])
 	}
 }
+
+func TestToggleOverviewAction(t *testing.T) {
+	f := newFakeNiri(t, func(req json.RawMessage) (any, error) {
+		if !strings.Contains(string(req), "ToggleOverview") {
+			return nil, fmt.Errorf("unexpected request: %s", string(req))
+		}
+		return nil, nil
+	})
+	c := f.Client()
+	if err := c.ToggleOverview(); err != nil {
+		t.Fatalf("ToggleOverview() error = %v", err)
+	}
+}

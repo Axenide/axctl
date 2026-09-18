@@ -55,7 +55,7 @@ func main() {
 		runDaemon(customConfigPath)
 	case "subscribe":
 		runSubscribe()
-	case "window", "workspace", "monitor", "layout", "config", "system", "darkmode", "brightness":
+	case "window", "workspace", "monitor", "layout", "config", "system", "darkmode", "brightness", "overview":
 		if len(remainingArgs) < 2 {
 			usage()
 			return
@@ -109,6 +109,8 @@ func usage() {
 	fmt.Println("    switch <id>             Switch workspace")
 	fmt.Println("    move-to <ws_id> [win_id] Move window to workspace")
 	fmt.Println("    toggle-special [name]   Toggle special workspace")
+	fmt.Println("\n  overview <action>")
+	fmt.Println("    toggle                  Toggle the compositor overview (niri only)")
 	fmt.Println("\n  monitor <action> [args]")
 	fmt.Println("    list                    List all monitors")
 	fmt.Println("    focus <id>              Focus monitor")

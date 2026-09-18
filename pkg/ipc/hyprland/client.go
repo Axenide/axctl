@@ -733,6 +733,10 @@ func (h *Hyprland) ToggleSpecialWorkspace(name string) error {
 	return err
 }
 
+func (h *Hyprland) ToggleOverview() error {
+	return ipc.ErrNotSupported
+}
+
 func (h *Hyprland) GetConfig(key string) (interface{}, error) {
 	resp, err := h.dispatch(fmt.Sprintf("j/getoption %s", key))
 	if err != nil {

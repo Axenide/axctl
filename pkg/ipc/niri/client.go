@@ -652,6 +652,10 @@ func (n *Niri) ToggleSpecialWorkspace(name string) error {
 	return ipc.ErrNotSupported
 }
 
+func (n *Niri) ToggleOverview() error {
+	return n.requestAction(map[string]interface{}{"ToggleOverview": map[string]interface{}{}})
+}
+
 func (n *Niri) GetConfig(key string) (interface{}, error) {
 	return nil, ipc.ErrNotSupported
 }

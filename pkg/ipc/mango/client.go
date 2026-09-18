@@ -408,6 +408,10 @@ func (m *Mango) ToggleSpecialWorkspace(name string) error {
 	return conn.Dispatch("toggle_named_scratchpad " + name)
 }
 
+func (m *Mango) ToggleOverview() error {
+	return ipc.ErrNotSupported
+}
+
 func (m *Mango) ListMonitors() ([]ipc.Monitor, error) {
 	conn, err := m.acquire()
 	if err != nil {

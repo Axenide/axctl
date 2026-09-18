@@ -639,6 +639,9 @@ func (s *Server) handleConnection(conn net.Conn) {
 			}
 			err = s.compositor.SetDpms(p.MonitorID, p.On)
 
+		case "Overview.Toggle":
+			err = s.compositor.ToggleOverview()
+
 		case "Layout.List":
 			result, err = s.listLayouts()
 		case "Layout.Set":

@@ -105,6 +105,16 @@ axctl workspace switch <id>
 axctl workspace move-to <workspace_id> [window_id]
 ```
 
+### Overview
+
+```bash
+axctl overview toggle
+```
+
+Toggles the compositor's overview. Only niri implements it
+(`ToggleOverview` IPC action); other compositors return
+"feature not supported".
+
 ### Monitor
 
 ```bash

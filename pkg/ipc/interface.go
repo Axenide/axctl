@@ -27,6 +27,7 @@ type Compositor interface {
 	MoveToWorkspace(windowID, workspaceID string) error
 	MoveToWorkspaceSilent(windowID, workspaceID string) error
 	ToggleSpecialWorkspace(name string) error
+	ToggleOverview() error
 
 	ListMonitors() ([]Monitor, error)
 	FocusMonitor(id string) error

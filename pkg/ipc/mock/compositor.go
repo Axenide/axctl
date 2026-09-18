@@ -37,6 +37,7 @@ type Compositor struct {
 		reloadConfig    int
 		loadConfig      []string
 		listLayouts     int
+		toggleOverview  int
 	}
 
 	subscribed bool
@@ -62,6 +63,7 @@ func NewCompositor() *Compositor {
 			reloadConfig    int
 			loadConfig      []string
 			listLayouts     int
+			toggleOverview  int
 		}{
 			focusWindow:     []string{},
 			closeWindow:     []string{},
@@ -237,6 +239,13 @@ func (c *Compositor) MoveToWorkspaceSilent(windowID, workspaceID string) error {
 }
 
 func (c *Compositor) ToggleSpecialWorkspace(name string) error {
+	return nil
+}
+
+func (c *Compositor) ToggleOverview() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.calls.toggleOverview++
 	return nil
 }
 
@@ -513,6 +522,12 @@ func (c *Compositor) SubscribeCalls() int {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.calls.subscribe
+}
+
+func (c *Compositor) ToggleOverviewCalls() int {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.calls.toggleOverview
 }
 
 func (c *Compositor) ReloadConfigCalls() int {
