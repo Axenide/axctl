@@ -17,6 +17,7 @@ type Server struct {
 	compositor ipc.Compositor
 	socketPath string
 	cache      *ipc.StateCache
+	cfgState   *ConfigState
 	clients    map[net.Conn]struct{}
 	clientsMu  sync.RWMutex
 	idleMgr    *IdleManager
@@ -32,6 +33,7 @@ func New(c ipc.Compositor, path string) *Server {
 		compositor: c,
 		socketPath: path,
 		cache:      ipc.NewStateCache(),
+		cfgState:   NewConfigState(),
 		clients:    make(map[net.Conn]struct{}),
 		idleMgr:    idleMgr,
 	}
@@ -62,6 +64,31 @@ func (s *Server) initCache() {
 	if err == nil {
 		s.cache.SetMonitors(m)
 	}
+}
+
+// SeedConfigState loads the last applied config payload into the cache so
+// partial updates (Config.Set, Config.KeybindsBatch) can regenerate the
+// generated file. The daemon calls it after applying the TOML at startup
+// and on reload.
+func (s *Server) SeedConfigState(payload ipc.ConfigUniversal) {
+	s.cfgState.Seed(payload)
+}
+
+func (s *Server) isNiri() bool {
+	_, ok := s.compositor.(*niri.Niri)
+	return ok
+}
+
+// applyNiriConfig mutates the cached config state through mutate and
+// regenerates the single generated niri config file from the result.
+// niri has no runtime keyword API, so partial updates rewrite the whole
+// generated file and reload it.
+func (s *Server) applyNiriConfig(mutate func(state *ConfigState) (ipc.ConfigUniversal, error)) error {
+	payload, err := mutate(s.cfgState)
+	if err != nil {
+		return err
+	}
+	return NewConfigHandler(s.compositor).ApplyConfig(payload)
 }
 
 func (s *Server) listLayouts() (ipc.Layouts, error) {
@@ -642,7 +669,11 @@ func (s *Server) handleConnection(conn net.Conn) {
 				resp.Error = fmt.Sprintf("invalid params: %v", err)
 				break
 			}
-			result, err = s.compositor.GetConfig(p.Key)
+			if s.isNiri() {
+				result, err = s.cfgState.GetKey(p.Key)
+			} else {
+				result, err = s.compositor.GetConfig(p.Key)
+			}
 		case "Config.Set":
 			var p struct {
 				Key   string      `json:"key"`
@@ -652,7 +683,13 @@ func (s *Server) handleConnection(conn net.Conn) {
 				resp.Error = fmt.Sprintf("invalid params: %v", err)
 				break
 			}
-			err = s.compositor.SetConfig(p.Key, p.Value)
+			if s.isNiri() {
+				err = s.applyNiriConfig(func(st *ConfigState) (ipc.ConfigUniversal, error) {
+					return st.SetKey(p.Key, p.Value)
+				})
+			} else {
+				err = s.compositor.SetConfig(p.Key, p.Value)
+			}
 		case "Config.Apply":
 			var p struct {
 				Payload string `json:"payload"`
@@ -671,6 +708,9 @@ func (s *Server) handleConnection(conn net.Conn) {
 			// output paths.
 			handler := NewConfigHandler(s.compositor)
 			err = handler.ApplyConfig(payload)
+			if err == nil {
+				s.cfgState.Seed(payload)
+			}
 
 		case "Config.Batch":
 			var p struct {
@@ -680,7 +720,13 @@ func (s *Server) handleConnection(conn net.Conn) {
 				resp.Error = fmt.Sprintf("invalid params: %v", err)
 				break
 			}
-			err = s.compositor.BatchConfig(p.Configs)
+			if s.isNiri() {
+				err = s.applyNiriConfig(func(st *ConfigState) (ipc.ConfigUniversal, error) {
+					return st.SetKeys(p.Configs)
+				})
+			} else {
+				err = s.compositor.BatchConfig(p.Configs)
+			}
 		case "Config.KeybindsBatch":
 			var p struct {
 				Payload string `json:"payload"`
@@ -689,7 +735,18 @@ func (s *Server) handleConnection(conn net.Conn) {
 				resp.Error = fmt.Sprintf("invalid params: %v", err)
 				break
 			}
-			err = s.compositor.BatchKeybinds(p.Payload)
+			if s.isNiri() {
+				var kbPayload ipc.BatchKeybindsPayload
+				if uerr := json.Unmarshal([]byte(p.Payload), &kbPayload); uerr != nil {
+					resp.Error = fmt.Sprintf("invalid keybinds payload: %v", uerr)
+					break
+				}
+				err = s.applyNiriConfig(func(st *ConfigState) (ipc.ConfigUniversal, error) {
+					return st.ApplyKeybinds(kbPayload)
+				})
+			} else {
+				err = s.compositor.BatchKeybinds(p.Payload)
+			}
 		case "Config.RawBatch":
 			var p struct {
 				Command string `json:"command"`
@@ -739,6 +796,12 @@ func (s *Server) handleConnection(conn net.Conn) {
 			x, y, err = s.compositor.GetCursorPosition()
 			if err == nil {
 				result = map[string]int{"x": x, "y": y}
+			}
+		case "System.GetCapabilities":
+			var caps ipc.Capabilities
+			caps, err = s.compositor.GetCapabilities()
+			if err == nil {
+				result = caps
 			}
 		case "System.IdleInhibit":
 			if s.idleMgr == nil {

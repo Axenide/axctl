@@ -164,6 +164,7 @@ func parseRequest(t *testing.T, raw json.RawMessage) interface{} {
 
 func TestNewRequiresSocket(t *testing.T) {
 	t.Setenv("NIRI_SOCKET", "")
+	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
 	if _, err := New(); err == nil {
 		t.Fatal("expected error when NIRI_SOCKET is empty")
 	}
@@ -873,5 +874,127 @@ func TestListLayoutsStatic(t *testing.T) {
 	}
 	if layouts[0].Source != ipc.LayoutSourceStatic {
 		t.Fatalf("source = %q, want static", layouts[0].Source)
+	}
+}
+
+func TestNewFindsSocketByGlob(t *testing.T) {
+	dir := t.TempDir()
+	sock := filepath.Join(dir, "niri.wayland-0.123.sock")
+	if err := os.WriteFile(sock, nil, 0o600); err != nil {
+		t.Fatalf("create fake socket: %v", err)
+	}
+	t.Setenv("NIRI_SOCKET", "")
+	t.Setenv("XDG_RUNTIME_DIR", dir)
+	c, err := New()
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if c.socketPath != sock {
+		t.Fatalf("socketPath = %q, want %q", c.socketPath, sock)
+	}
+}
+
+func TestListWindowsSizeMetadata(t *testing.T) {
+	f := newFakeNiri(t, func(req json.RawMessage) (any, error) {
+		var v interface{}
+		_ = json.Unmarshal(req, &v)
+		switch s, _ := v.(string); s {
+		case "Workspaces":
+			return map[string]interface{}{"Workspaces": []map[string]interface{}{}}, nil
+		case "Windows":
+			return map[string]interface{}{"Windows": []map[string]interface{}{
+				{
+					"id": float64(7), "title": "Demo", "app_id": "demo.app",
+					"workspace_id": float64(2), "is_focused": true,
+					"layout": map[string]interface{}{"window_size": []float64{1280, 720}},
+				},
+			}}, nil
+		}
+		return nil, fmt.Errorf("unexpected request: %s", string(req))
+	})
+	c := f.Client()
+	windows, err := c.ListWindows()
+	if err != nil {
+		t.Fatalf("ListWindows() error = %v", err)
+	}
+	if len(windows) != 1 {
+		t.Fatalf("windows = %d, want 1", len(windows))
+	}
+	md := windows[0].Metadata
+	if md["width"] != 1280 || md["height"] != 720 {
+		t.Fatalf("size metadata = %v/%v, want 1280/720", md["width"], md["height"])
+	}
+	if md["monitor_id"] != "" {
+		t.Fatalf("monitor_id = %v, want empty (no workspaces)", md["monitor_id"])
+	}
+}
+
+func TestListWorkspacesSortedByIdx(t *testing.T) {
+	f := newFakeNiri(t, func(req json.RawMessage) (any, error) {
+		return map[string]interface{}{"Workspaces": []map[string]interface{}{
+			{"id": float64(30), "idx": float64(3), "output": "DP-1", "is_active": true},
+			{"id": float64(10), "idx": float64(1), "output": "DP-1", "is_active": true},
+			{"id": float64(20), "idx": float64(2), "output": "DP-1", "is_active": true},
+		}}, nil
+	})
+	c := f.Client()
+	ws, err := c.ListWorkspaces()
+	if err != nil {
+		t.Fatalf("ListWorkspaces() error = %v", err)
+	}
+	if len(ws) != 3 {
+		t.Fatalf("workspaces = %d, want 3", len(ws))
+	}
+	want := []string{"10", "20", "30"}
+	for i, id := range want {
+		if ws[i].ID != id {
+			t.Fatalf("workspace[%d].ID = %q, want %q", i, ws[i].ID, id)
+		}
+	}
+}
+
+func TestListMonitorsFocusAndActiveWorkspace(t *testing.T) {
+	f := newFakeNiri(t, func(req json.RawMessage) (any, error) {
+		var v interface{}
+		_ = json.Unmarshal(req, &v)
+		switch s, _ := v.(string); s {
+		case "Workspaces":
+			return map[string]interface{}{"Workspaces": []map[string]interface{}{
+				{"id": float64(1), "idx": float64(1), "output": "DP-1", "is_active": true, "is_focused": true},
+				{"id": float64(5), "idx": float64(1), "output": "HDMI-A-1", "is_active": true},
+			}}, nil
+		case "Outputs":
+			return map[string]interface{}{"Outputs": map[string]interface{}{
+				"DP-1":     map[string]interface{}{"name": "DP-1", "make": "A", "model": "B"},
+				"HDMI-A-1": map[string]interface{}{"name": "HDMI-A-1", "make": "C", "model": "D"},
+			}}, nil
+		}
+		return nil, fmt.Errorf("unexpected request: %s", string(req))
+	})
+	c := f.Client()
+	monitors, err := c.ListMonitors()
+	if err != nil {
+		t.Fatalf("ListMonitors() error = %v", err)
+	}
+	if len(monitors) != 2 {
+		t.Fatalf("monitors = %d, want 2", len(monitors))
+	}
+	byName := map[string]ipc.Monitor{}
+	for _, m := range monitors {
+		byName[m.Name] = m
+	}
+	dp := byName["DP-1"]
+	if !dp.IsFocused {
+		t.Fatal("DP-1 should be focused (derived from focused workspace)")
+	}
+	if dp.Metadata["active_workspace"] != "1" {
+		t.Fatalf("DP-1 active_workspace = %v, want 1", dp.Metadata["active_workspace"])
+	}
+	hdmi := byName["HDMI-A-1"]
+	if hdmi.IsFocused {
+		t.Fatal("HDMI-A-1 should not be focused")
+	}
+	if hdmi.Metadata["active_workspace"] != "5" {
+		t.Fatalf("HDMI-A-1 active_workspace = %v, want 5", hdmi.Metadata["active_workspace"])
 	}
 }

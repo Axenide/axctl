@@ -292,6 +292,8 @@ func runDaemon(customConfigPath string) {
 			configDir := filepath.Dir(configPath)
 			if applyErr := config.ApplyConfig(cfg, comp, configDir); applyErr != nil {
 				fmt.Printf("[axctl-config] Error applying config: %v\n", applyErr)
+			} else {
+				srv.SeedConfigState(cfg.ToIPCConfig())
 			}
 		}
 
@@ -305,6 +307,8 @@ func runDaemon(customConfigPath string) {
 				fmt.Println("[axctl-config] Config changed, reloading...")
 				if applyErr := config.ApplyConfig(newCfg, comp, configDir); applyErr != nil {
 					fmt.Printf("[axctl-config] Error applying config: %v\n", applyErr)
+				} else {
+					srv.SeedConfigState(newCfg.ToIPCConfig())
 				}
 			})
 			cfgWatcher = watcher

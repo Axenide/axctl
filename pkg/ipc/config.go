@@ -2,6 +2,8 @@ package ipc
 
 import (
 	"encoding/json"
+	"fmt"
+	"strings"
 )
 
 // Gaps config
@@ -204,4 +206,243 @@ type LuaConfigGenerator interface {
 	GenerateWindowRulesLua(rules []WindowRule) string
 	GenerateLayerRulesLua(rules []LayerRule) string
 	GenerateStartupLua(exec []string, execOnce []string) string
+}
+
+// SetAppearanceKey sets one dot-notated appearance key (e.g. "gaps.inner")
+// in the universal appearance config. The key set mirrors the Hyprland
+// BatchConfig mapping so every compositor accepts the same names.
+// Returns false for unknown keys or values of the wrong type.
+func SetAppearanceKey(a *ConfigAppearance, key string, value interface{}) bool {
+	switch key {
+	case "gaps.inner":
+		if v, ok := coerceInt(value); ok {
+			a.ensureGaps().Inner = v
+			return true
+		}
+	case "gaps.outer":
+		if v, ok := coerceInt(value); ok {
+			a.ensureGaps().Outer = v
+			return true
+		}
+	case "border.width":
+		if v, ok := coerceInt(value); ok {
+			a.ensureBorder().Width = v
+			return true
+		}
+	case "border.active_color":
+		if v, ok := coerceString(value); ok {
+			a.ensureBorder().ActiveColor = v
+			return true
+		}
+	case "border.inactive_color":
+		if v, ok := coerceString(value); ok {
+			a.ensureBorder().InactiveColor = v
+			return true
+		}
+	case "opacity.active":
+		if v, ok := coerceFloat(value); ok {
+			a.ensureOpacity().Active = v
+			return true
+		}
+	case "opacity.inactive":
+		if v, ok := coerceFloat(value); ok {
+			a.ensureOpacity().Inactive = v
+			return true
+		}
+	case "blur.enabled":
+		if v, ok := coerceBool(value); ok {
+			a.ensureBlur().Enabled = v
+			return true
+		}
+	case "blur.size":
+		if v, ok := coerceInt(value); ok {
+			a.ensureBlur().Size = v
+			return true
+		}
+	case "blur.passes":
+		if v, ok := coerceInt(value); ok {
+			a.ensureBlur().Passes = v
+			return true
+		}
+	}
+	return false
+}
+
+// GetAppearanceKey reads one dot-notated appearance key back from the
+// universal appearance config. Unset values return (nil, true); unknown
+// keys return (nil, false).
+func GetAppearanceKey(a *ConfigAppearance, key string) (interface{}, bool) {
+	switch key {
+	case "gaps.inner":
+		if a.Gaps == nil {
+			return nil, true
+		}
+		return derefInt(a.Gaps.Inner), true
+	case "gaps.outer":
+		if a.Gaps == nil {
+			return nil, true
+		}
+		return derefInt(a.Gaps.Outer), true
+	case "border.width":
+		if a.Border == nil {
+			return nil, true
+		}
+		return derefInt(a.Border.Width), true
+	case "border.active_color":
+		if a.Border == nil {
+			return nil, true
+		}
+		return derefString(a.Border.ActiveColor), true
+	case "border.inactive_color":
+		if a.Border == nil {
+			return nil, true
+		}
+		return derefString(a.Border.InactiveColor), true
+	case "opacity.active":
+		if a.Opacity == nil {
+			return nil, true
+		}
+		return derefFloat(a.Opacity.Active), true
+	case "opacity.inactive":
+		if a.Opacity == nil {
+			return nil, true
+		}
+		return derefFloat(a.Opacity.Inactive), true
+	case "blur.enabled":
+		if a.Blur == nil {
+			return nil, true
+		}
+		return derefBool(a.Blur.Enabled), true
+	case "blur.size":
+		if a.Blur == nil {
+			return nil, true
+		}
+		return derefInt(a.Blur.Size), true
+	case "blur.passes":
+		if a.Blur == nil {
+			return nil, true
+		}
+		return derefInt(a.Blur.Passes), true
+	}
+	return nil, false
+}
+
+func (a *ConfigAppearance) ensureGaps() *Gaps {
+	if a.Gaps == nil {
+		a.Gaps = &Gaps{}
+	}
+	return a.Gaps
+}
+
+func (a *ConfigAppearance) ensureBorder() *Border {
+	if a.Border == nil {
+		a.Border = &Border{}
+	}
+	return a.Border
+}
+
+func (a *ConfigAppearance) ensureOpacity() *Opacity {
+	if a.Opacity == nil {
+		a.Opacity = &Opacity{}
+	}
+	return a.Opacity
+}
+
+func (a *ConfigAppearance) ensureBlur() *Blur {
+	if a.Blur == nil {
+		a.Blur = &Blur{}
+	}
+	return a.Blur
+}
+
+// coerceInt accepts JSON-decoded numbers (float64), Go integers, and
+// numeric strings, returning a pointer to the parsed int.
+func coerceInt(value interface{}) (*int, bool) {
+	switch t := value.(type) {
+	case float64:
+		v := int(t)
+		return &v, true
+	case int:
+		return &t, true
+	case int64:
+		v := int(t)
+		return &v, true
+	case string:
+		var v int
+		if _, err := fmt.Sscanf(strings.TrimSpace(t), "%d", &v); err == nil {
+			return &v, true
+		}
+	}
+	return nil, false
+}
+
+func coerceFloat(value interface{}) (*float64, bool) {
+	switch t := value.(type) {
+	case float64:
+		return &t, true
+	case int:
+		v := float64(t)
+		return &v, true
+	case int64:
+		v := float64(t)
+		return &v, true
+	case string:
+		var v float64
+		if _, err := fmt.Sscanf(strings.TrimSpace(t), "%g", &v); err == nil {
+			return &v, true
+		}
+	}
+	return nil, false
+}
+
+func coerceBool(value interface{}) (*bool, bool) {
+	switch t := value.(type) {
+	case bool:
+		return &t, true
+	case string:
+		switch strings.ToLower(strings.TrimSpace(t)) {
+		case "true":
+			v := true
+			return &v, true
+		case "false":
+			v := false
+			return &v, true
+		}
+	}
+	return nil, false
+}
+
+func coerceString(value interface{}) (*string, bool) {
+	if t, ok := value.(string); ok {
+		return &t, true
+	}
+	return nil, false
+}
+
+func derefInt(v *int) interface{} {
+	if v == nil {
+		return nil
+	}
+	return *v
+}
+
+func derefFloat(v *float64) interface{} {
+	if v == nil {
+		return nil
+	}
+	return *v
+}
+
+func derefBool(v *bool) interface{} {
+	if v == nil {
+		return nil
+	}
+	return *v
+}
+
+func derefString(v *string) interface{} {
+	if v == nil {
+		return nil
+	}
+	return *v
 }

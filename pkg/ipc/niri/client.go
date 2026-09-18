@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
+	"sort"
 	"sync"
 	"time"
 
@@ -20,7 +22,15 @@ type Niri struct {
 func New() (*Niri, error) {
 	path := os.Getenv("NIRI_SOCKET")
 	if path == "" {
-		return nil, fmt.Errorf("NIRI_SOCKET not set")
+		// niri may not export NIRI_SOCKET to processes started outside its
+		// session (systemd units, daemons). Discover the running instance's
+		// socket by globbing the runtime dir; real sockets are named
+		// niri.<wayland-display>.<pid>.sock.
+		matches, err := filepath.Glob(filepath.Join(os.Getenv("XDG_RUNTIME_DIR"), "niri*.sock"))
+		if err != nil || len(matches) == 0 {
+			return nil, fmt.Errorf("NIRI_SOCKET not set and no niri socket found in XDG_RUNTIME_DIR")
+		}
+		path = matches[0]
 	}
 	return &Niri{socketPath: path}, nil
 }
@@ -207,6 +217,18 @@ func (n *Niri) ListWindows() ([]ipc.Window, error) {
 			monitorID = wsOutputMap[wsID]
 		}
 
+		metadata := map[string]interface{}{
+			"monitor_id": monitorID,
+			"is_urgent":  w.IsUrgent,
+			"pid":        w.PID,
+		}
+		// niri reports window size via layout.window_size [w, h] in logical
+		// pixels. There is no absolute position, so x/y stay unset.
+		if w.Layout != nil && w.Layout.WindowSize != nil {
+			metadata["width"] = w.Layout.WindowSize[0]
+			metadata["height"] = w.Layout.WindowSize[1]
+		}
+
 		windows[i] = ipc.Window{
 			ID:           fmt.Sprintf("%d", w.ID),
 			Title:        title,
@@ -216,11 +238,7 @@ func (n *Niri) ListWindows() ([]ipc.Window, error) {
 			IsFloating:   w.IsFloating,
 			IsFullscreen: false,
 			IsHidden:     false,
-			Metadata: map[string]interface{}{
-				"monitor_id": monitorID,
-				"is_urgent":  w.IsUrgent,
-				"pid":        w.PID,
-			},
+			Metadata:     metadata,
 		}
 	}
 	return windows, nil
@@ -396,6 +414,12 @@ func (n *Niri) ListWorkspaces() ([]ipc.Workspace, error) {
 		return nil, err
 	}
 
+	// Sort by workspace index so consumers see the real workspace order;
+	// niri returns them in no guaranteed order.
+	sort.SliceStable(niriWorkspaces, func(a, b int) bool {
+		return niriWorkspaces[a].Idx < niriWorkspaces[b].Idx
+	})
+
 	res := make([]ipc.Workspace, len(niriWorkspaces))
 	for i, w := range niriWorkspaces {
 		name := ""
@@ -495,14 +519,44 @@ func (n *Niri) ListMonitors() ([]ipc.Monitor, error) {
 		return nil, err
 	}
 
+	// Outputs carry no focused flag; the focused workspace knows its output.
+	// Derive the focused output and each output's active workspace from a
+	// single workspaces query. Failures degrade gracefully to unfocused.
+	focusedOutput := ""
+	activeWorkspaceByOutput := make(map[string]string)
+	if wsRaw, wsErr := n.requestRaw("Workspaces"); wsErr == nil {
+		if wsVariant, wsErr := unwrapVariant(wsRaw, "Workspaces"); wsErr == nil {
+			var niriWorkspaces []niriWorkspace
+			if json.Unmarshal(wsVariant, &niriWorkspaces) == nil {
+				for _, w := range niriWorkspaces {
+					output := ""
+					if w.Output != nil {
+						output = *w.Output
+					}
+					if w.IsFocused && focusedOutput == "" {
+						focusedOutput = output
+					}
+					if w.IsActive && output != "" {
+						if _, exists := activeWorkspaceByOutput[output]; !exists {
+							activeWorkspaceByOutput[output] = fmt.Sprintf("%d", w.ID)
+						}
+					}
+				}
+			}
+		}
+	}
+
 	res := make([]ipc.Monitor, 0, len(outputs))
 	for name, o := range outputs {
 		m := ipc.Monitor{
 			ID:          name,
 			Name:        name,
 			Description: fmt.Sprintf("%s %s", o.Make, o.Model),
-			IsFocused:   false,
+			IsFocused:   name == focusedOutput,
 			Metadata:    make(map[string]interface{}),
+		}
+		if id, ok := activeWorkspaceByOutput[name]; ok {
+			m.Metadata["active_workspace"] = id
 		}
 		m.Metadata["make"] = o.Make
 		m.Metadata["model"] = o.Model
@@ -893,14 +947,19 @@ func (n *Niri) GetCapabilities() (ipc.Capabilities, error) {
 }
 
 type niriWindow struct {
-	ID          uint64  `json:"id"`
-	Title       *string `json:"title"`
-	AppID       *string `json:"app_id"`
-	PID         *int32  `json:"pid"`
-	WorkspaceID *uint64 `json:"workspace_id"`
-	IsFocused   bool    `json:"is_focused"`
-	IsFloating  bool    `json:"is_floating"`
-	IsUrgent    bool    `json:"is_urgent"`
+	ID          uint64            `json:"id"`
+	Title       *string           `json:"title"`
+	AppID       *string           `json:"app_id"`
+	PID         *int32            `json:"pid"`
+	WorkspaceID *uint64           `json:"workspace_id"`
+	IsFocused   bool              `json:"is_focused"`
+	IsFloating  bool              `json:"is_floating"`
+	IsUrgent    bool              `json:"is_urgent"`
+	Layout      *niriWindowLayout `json:"layout"`
+}
+
+type niriWindowLayout struct {
+	WindowSize *[2]int `json:"window_size"`
 }
 
 type niriWindowEvent struct {
