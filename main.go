@@ -163,6 +163,7 @@ func usage() {
 	fmt.Println("    app-inhibit-check [patterns...] Check if apps are inhibiting idle (default: vlc,mpv,firefox,chromium,brave,steam)")
 	fmt.Println("    media-inhibit-check   Check for active audio/media (PulseAudio/PipeWire)")
 	fmt.Println("    get-capabilities        Get compositor capabilities")
+	fmt.Println("    get-compositor          Get the compositor backend name (hyprland/niri/mango)")
 	fmt.Println("    keymon-status           Show modifier-alone key monitor state (binds, devices, errors)")
 	fmt.Println("    exit                    Exit compositor")
 	fmt.Println("\n  darkmode <action>")

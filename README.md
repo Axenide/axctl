@@ -153,6 +153,7 @@ axctl system set-keyboard-layouts "us,es" "altgr-intl,"
 axctl system idle-wait <ms>
 axctl system is-idle <ms>
 axctl system get-capabilities
+axctl system get-compositor
 ```
 
 ### Brightness

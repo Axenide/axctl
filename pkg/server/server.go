@@ -828,6 +828,8 @@ func (s *Server) handleConnection(conn net.Conn) {
 			if err == nil {
 				result = caps
 			}
+		case "System.GetCompositor":
+			result = s.compositorName()
 		case "System.KeymonStatus":
 			result = s.keyMon.Status()
 		case "System.IdleInhibit":

@@ -129,3 +129,36 @@ func TestOverviewToggleDispatch(t *testing.T) {
 		t.Fatalf("ToggleOverviewCalls = %d, want 1", got)
 	}
 }
+
+func TestSystemGetCompositorDispatch(t *testing.T) {
+	mockComp := mock.NewCompositor()
+	socketPath := filepath.Join(t.TempDir(), "axctl-test.sock")
+	srv := New(mockComp, socketPath)
+	go srv.Start()
+	defer func() {
+		_ = os.Remove(socketPath)
+	}()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if _, statErr := os.Stat(socketPath); statErr == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("test server did not start")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	result, errString := dispatch(t, socketPath, "System.GetCompositor", map[string]interface{}{})
+	if errString != "" {
+		t.Fatalf("System.GetCompositor error = %q", errString)
+	}
+	var name string
+	if err := json.Unmarshal(result, &name); err != nil {
+		t.Fatalf("unmarshal result: %v (%s)", err, string(result))
+	}
+	if name == "" {
+		t.Fatalf("compositor name = %q, want non-empty", name)
+	}
+}
