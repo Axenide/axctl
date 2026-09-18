@@ -29,10 +29,10 @@ const (
 	evKeyBit = 1
 	keyA     = 30
 	keyZ     = 48
-	// _IOWR('E', 0x20, 8) and _IOWR('E', 0x21, 96): EVIOCGBIT for event
-	// types and key codes.
-	eviocgbitType = 0xC0084520
-	eviocgbitKey  = 0xC0604521
+	// EVIOCGBIT(0, 8) and EVIOCGBIT(EV_KEY, 96), per linux/input.h:
+	// _IOC(_IOC_READ, 'E', 0x20 + ev, len) — read direction only.
+	eviocgbitType = 0x80084520
+	eviocgbitKey  = 0x80604521
 )
 
 // Status is a snapshot of the monitor state for introspection.
@@ -48,12 +48,12 @@ type Status struct {
 // the first SetBinds call and readers run for the daemon's lifetime; binds
 // can be swapped at any time.
 type Monitor struct {
-	mu       sync.Mutex
-	binds    map[string]string
-	open     bool
-	warned   bool
-	devices  map[string]bool
-	errors   map[string]string
+	mu      sync.Mutex
+	binds   map[string]string
+	open    bool
+	warned  bool
+	devices map[string]bool
+	errors  map[string]string
 }
 
 func NewMonitor() *Monitor {

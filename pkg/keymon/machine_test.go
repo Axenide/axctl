@@ -118,3 +118,18 @@ func TestSecondSuperReleaseDoesNotDoubleFire(t *testing.T) {
 		t.Fatalf("release of non-held key fired: %q", got)
 	}
 }
+
+func TestEviocgbitConstants(t *testing.T) {
+	_IOC := func(dir, typ, nr, size uint32) uint32 {
+		return dir<<30 | size<<16 | typ<<8 | nr
+	}
+	const iocRead = 2
+	wantType := _IOC(iocRead, 'E', 0x20, 8)
+	wantKey := _IOC(iocRead, 'E', 0x21, 96)
+	if eviocgbitType != wantType {
+		t.Fatalf("eviocgbitType = %#x, want %#x", eviocgbitType, wantType)
+	}
+	if eviocgbitKey != wantKey {
+		t.Fatalf("eviocgbitKey = %#x, want %#x", eviocgbitKey, wantKey)
+	}
+}
