@@ -465,6 +465,15 @@ func (n *Niri) ActiveWorkspace() (*ipc.Workspace, error) {
 }
 
 func (n *Niri) SwitchWorkspace(id string) error {
+	// Hyprland-style relative ids (r+1/r-1, and the bare +1/-1 forms)
+	// map to niri's relative focus actions, which clamp at the ends
+	// just like Hyprland's r-suffixed relatives.
+	switch id {
+	case "r+1", "+1":
+		return n.requestAction(map[string]interface{}{"FocusWorkspaceDown": map[string]interface{}{}})
+	case "r-1", "-1":
+		return n.requestAction(map[string]interface{}{"FocusWorkspaceUp": map[string]interface{}{}})
+	}
 	ref, err := n.workspaceReference(id)
 	if err != nil {
 		return err

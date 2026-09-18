@@ -564,6 +564,25 @@ func TestSwitchWorkspaceByName(t *testing.T) {
 	jsonEq(t, f.requestsSnapshot()[0], `{"Action":{"FocusWorkspace":{"reference":{"Name":"code"}}}}`)
 }
 
+func TestSwitchWorkspaceRelative(t *testing.T) {
+	cases := []struct {
+		id   string
+		want string
+	}{
+		{"r+1", `{"Action":{"FocusWorkspaceDown":{}}}`},
+		{"+1", `{"Action":{"FocusWorkspaceDown":{}}}`},
+		{"r-1", `{"Action":{"FocusWorkspaceUp":{}}}`},
+		{"-1", `{"Action":{"FocusWorkspaceUp":{}}}`},
+	}
+	for _, c := range cases {
+		f := newFakeNiri(t, func(req json.RawMessage) (any, error) { return nil, nil })
+		if err := f.Client().SwitchWorkspace(c.id); err != nil {
+			t.Fatalf("SwitchWorkspace(%q) error = %v", c.id, err)
+		}
+		jsonEq(t, f.requestsSnapshot()[0], c.want)
+	}
+}
+
 func TestMoveToWorkspaceFollows(t *testing.T) {
 	f := newFakeNiri(t, func(req json.RawMessage) (any, error) { return nil, nil })
 	c := f.Client()
