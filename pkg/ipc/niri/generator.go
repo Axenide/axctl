@@ -166,19 +166,190 @@ var niriDispatchers = map[string]string{
 	"toggle-column-tabbed-display": "toggle-column-tabbed-display",
 }
 
-// niriMapDispatcher translates a Hyprland dispatcher name into its Niri
-// equivalent. The second return value reports whether Niri actually
-// understands the translated form — false means the dispatcher is
-// Hyprland-specific and should be skipped rather than emitted (the caller
-// emits a "skipped" comment so the user can wire it up by hand).
-func niriMapDispatcher(d string) (string, bool) {
+// niriMapDispatcher translates a Hyprland dispatcher + argument into a full
+// niri action statement (ready to emit inside a bind node). The second
+// return value reports whether the translation is possible — false means
+// the dispatcher is Hyprland-specific and the caller emits a "skipped"
+// comment so the user can wire it up by hand.
+func niriMapDispatcher(d, arg string) (string, bool) {
 	if d == "" {
-		return "spawn", true
+		return "", false
+	}
+	switch d {
+	case "killactive":
+		return "close-window", true
+	case "exit":
+		return "quit", true
+	case "fullscreen":
+		// Hyprland: 0 = fullscreen toggle, 1 = maximize toggle.
+		if arg == "1" {
+			return "maximize-window", true
+		}
+		return "fullscreen-window", true
+	case "movefocus":
+		switch arg {
+		case "l":
+			return "focus-column-left", true
+		case "r":
+			return "focus-column-right", true
+		case "u":
+			return "focus-window-up", true
+		case "d":
+			return "focus-window-down", true
+		}
+		return "", false
+	case "movewindow":
+		switch arg {
+		case "l":
+			return "move-column-left", true
+		case "r":
+			return "move-column-right", true
+		case "u":
+			return "move-window-up", true
+		case "d":
+			return "move-window-down", true
+		}
+		return "", false
+	case "workspace":
+		ref, dir, ok := niriWorkspaceTarget(arg)
+		if !ok {
+			return "", false
+		}
+		if dir > 0 {
+			return "focus-workspace-down", true
+		}
+		if dir < 0 {
+			return "focus-workspace-up", true
+		}
+		return formatNiriAction("focus-workspace", ref), true
+	case "movetoworkspace":
+		ref, dir, ok := niriWorkspaceTarget(arg)
+		if !ok {
+			return "", false
+		}
+		switch {
+		case dir > 0:
+			return "move-window-to-workspace-down", true
+		case dir < 0:
+			return "move-window-to-workspace-up", true
+		}
+		return formatNiriAction("move-window-to-workspace", ref), true
+	case "movetoworkspacesilent":
+		ref, dir, ok := niriWorkspaceTarget(arg)
+		if !ok {
+			return "", false
+		}
+		switch {
+		case dir > 0:
+			return "move-window-to-workspace-down focus=false", true
+		case dir < 0:
+			return "move-window-to-workspace-up focus=false", true
+		}
+		return formatNiriAction("move-window-to-workspace", ref) + " focus=false", true
+	case "resizeactive":
+		// "dx dy" pixel deltas. niri resizes width and height through
+		// separate actions, so pick the non-zero axis. "+N"/"-N" parse as
+		// SizeChange::AdjustFixed (a resize delta), "N" would be SetFixed.
+		// SizeChange args are knuffel string scalars, so quote them — a bare
+		// "+50" is an invalid KDL integer literal.
+		fields := strings.Fields(arg)
+		dx, dy := 0, 0
+		if len(fields) > 0 {
+			dx, _ = strconv.Atoi(fields[0])
+		}
+		if len(fields) > 1 {
+			dy, _ = strconv.Atoi(fields[1])
+		}
+		switch {
+		case dx != 0:
+			return "set-column-width " + kdlQuote(fmt.Sprintf("%+d", dx)), true
+		case dy != 0:
+			return "set-window-height " + kdlQuote(fmt.Sprintf("%+d", dy)), true
+		}
+		return "", false
+	case "layoutmsg":
+		fields := strings.Fields(arg)
+		if len(fields) == 0 {
+			return "", false
+		}
+		switch fields[0] {
+		case "promote", "togglefit":
+			return "maximize-column", true
+		case "colresize":
+			if len(fields) > 1 && isNiriSizeChange(fields[1]) {
+				return "set-column-width " + kdlQuote(fields[1]), true
+			}
+		}
+		return "", false
+	case "togglespecialworkspace":
+		return "", false
 	}
 	if v, ok := niriDispatchers[d]; ok {
-		return v, true
+		return formatNiriAction(v, arg), true
 	}
 	return "", false
+}
+
+// niriWorkspaceTarget normalizes a Hyprland workspace argument into a niri
+// reference. dir is +1/-1 for relative moves ("+1", "-1", "e+1", "e-1") and
+// 0 for an absolute reference (index or name). Hyprland-only targets
+// ("empty", "previous", "mousetoward", "reset") are rejected.
+func niriWorkspaceTarget(arg string) (ref string, dir int, ok bool) {
+	rel := strings.TrimPrefix(arg, "e")
+	if len(rel) > 1 && (rel[0] == '+' || rel[0] == '-') && isNumeric(rel[1:]) {
+		if rel[0] == '+' {
+			return "", 1, true
+		}
+		return "", -1, true
+	}
+	switch arg {
+	case "":
+		return "", 0, false
+	case "previous", "empty", "reset", "all":
+		return "", 0, false
+	}
+	if strings.HasPrefix(arg, "mousetoward") || !isNumeric(arg) && strings.ContainsAny(arg, " \t") {
+		return "", 0, false
+	}
+	return arg, 0, true
+}
+
+func isNumeric(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// isNiriSizeChange reports whether a token is a valid niri SizeChange
+// argument: an integer (fixed px, "+N"/"-N" adjust) or "N%"/"+N%" proportion.
+func isNiriSizeChange(s string) bool {
+	body := strings.TrimSuffix(s, "%")
+	if !isNumeric(strings.TrimPrefix(body, "+")) && !isNumeric(strings.TrimPrefix(body, "-")) {
+		return false
+	}
+	if strings.HasSuffix(s, "%") {
+		return true
+	}
+	_, err := strconv.Atoi(s)
+	return err == nil
+}
+
+// formatNiriAction appends a formatted argument to an action name: integers
+// unquoted (niri workspace references), everything else KDL-quoted.
+func formatNiriAction(name, arg string) string {
+	if arg == "" {
+		return name
+	}
+	if i, err := strconv.Atoi(arg); err == nil {
+		return fmt.Sprintf("%s %d", name, i)
+	}
+	return name + " " + kdlQuote(arg)
 }
 
 func (g *Generator) GenerateAppearance(config ipc.ConfigAppearance) string {
@@ -199,48 +370,40 @@ func (g *Generator) GenerateAppearance(config ipc.ConfigAppearance) string {
 			b.WriteString("layout {\n")
 			hasLayout = true
 		}
-		hasBorderContent := false
+		// The border replaces the focus ring (they would double-draw around
+		// the focused window), and `on` is required because niri ships the
+		// border disabled by default.
+		b.WriteString("    focus-ring {\n        off\n    }\n")
+		b.WriteString("    border {\n        on\n")
 		if config.Border.Width != nil {
-			if !hasBorderContent {
-				b.WriteString("    border {\n")
-				hasBorderContent = true
-			}
 			b.WriteString(fmt.Sprintf("        width %d\n", *config.Border.Width))
 		}
 		if config.Border.ActiveColor != nil {
 			color := niriFirstColor(*config.Border.ActiveColor)
 			if color != "" {
-				if !hasBorderContent {
-					b.WriteString("    border {\n")
-					hasBorderContent = true
-				}
 				b.WriteString(fmt.Sprintf("        active-color %s\n", kdlQuote(color)))
 			}
 		}
 		if config.Border.InactiveColor != nil {
 			color := niriFirstColor(*config.Border.InactiveColor)
 			if color != "" {
-				if !hasBorderContent {
-					b.WriteString("    border {\n")
-					hasBorderContent = true
-				}
 				b.WriteString(fmt.Sprintf("        inactive-color %s\n", kdlQuote(color)))
 			}
 		}
-		if hasBorderContent {
-			b.WriteString("    }\n")
-		}
+		b.WriteString("    }\n")
 	}
 	if hasLayout {
 		b.WriteString("}\n\n")
 	}
 
+	// Rounding is applied to all windows via a match-less window-rule.
+	if config.Border != nil && config.Border.Rounding != nil {
+		b.WriteString(fmt.Sprintf("\nwindow-rule {\n    geometry-corner-radius %d\n    clip-to-geometry true\n}\n", *config.Border.Rounding))
+	}
+
 	unsupported := []string{}
 	if config.Gaps != nil && config.Gaps.Outer != nil {
 		unsupported = append(unsupported, "outer gaps (use inner gaps in niri)")
-	}
-	if config.Border != nil && config.Border.Rounding != nil {
-		unsupported = append(unsupported, "border rounding (niri uses per-app window-rule geometry-corner-radius)")
 	}
 	if config.Opacity != nil {
 		unsupported = append(unsupported, "opacity (niri uses per-app window-rule opacity)")
@@ -287,18 +450,24 @@ func (g *Generator) GenerateKeybinds(config ipc.ConfigKeybinds) string {
 			skipped = append(skipped, fmt.Sprintf("%s — %s (key %q has no niri equivalent)", comment, kb.Dispatcher, kb.Key))
 			return
 		}
-		dispatcher, ok := niriMapDispatcher(kb.Dispatcher)
-		if !ok {
-			skipped = append(skipped, fmt.Sprintf("%s — %s (dispatcher not supported in niri)", comment, kb.Dispatcher))
-			return
+		arg := kb.Argument
+
+		isSpawn := kb.Dispatcher == "" || kb.Dispatcher == "exec" || kb.Dispatcher == "spawn"
+		var action string
+		if !isSpawn {
+			var ok bool
+			action, ok = niriMapDispatcher(kb.Dispatcher, arg)
+			if !ok {
+				skipped = append(skipped, fmt.Sprintf("%s — %s (dispatcher not supported in niri)", comment, kb.Dispatcher))
+				return
+			}
 		}
+
 		combo := formatNiriModifiers(kb.Modifiers)
 		if combo != "" {
 			combo += "+"
 		}
 		combo += key
-
-		arg := kb.Argument
 
 		if kb.Flags != "" {
 			b.WriteString(fmt.Sprintf("    %s repeat=false {\n", combo))
@@ -306,7 +475,7 @@ func (g *Generator) GenerateKeybinds(config ipc.ConfigKeybinds) string {
 			b.WriteString(fmt.Sprintf("    %s {\n", combo))
 		}
 
-		if dispatcher == "spawn" {
+		if isSpawn {
 			parts := tokenizeShell(arg)
 			if len(parts) == 0 {
 				parts = []string{arg}
@@ -317,15 +486,7 @@ func (g *Generator) GenerateKeybinds(config ipc.ConfigKeybinds) string {
 			}
 			b.WriteString("\n")
 		} else {
-			b.WriteString("        " + dispatcher)
-			if arg != "" {
-				if i, err := strconv.Atoi(arg); err == nil {
-					b.WriteString(fmt.Sprintf(" %d", i))
-				} else {
-					b.WriteString(" " + kdlQuote(arg))
-				}
-			}
-			b.WriteString("\n")
+			b.WriteString("        " + action + "\n")
 		}
 
 		b.WriteString("    }")

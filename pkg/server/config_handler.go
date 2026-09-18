@@ -15,6 +15,19 @@ const luaBanner = "-- ▄    ▄▄▄  ▄▄ ▄▄  ▄▄▄▄ ▄▄▄▄
 
 const confBanner = "# ▄    ▄▄▄  ▄▄ ▄▄  ▄▄▄▄ ▄▄▄▄▄▄ ▄▄    \n#  ▀▄ ██▀██ ▀█▄█▀ ██▀▀▀   ██   ██    \n# ▄▀  ██▀██ ██ ██ ▀████   ██   ██▄▄▄ \n"
 
+const kdlBanner = "// ▄    ▄▄▄  ▄▄ ▄▄  ▄▄▄▄ ▄▄▄▄▄▄ ▄▄    \n//  ▀▄ ██▀██ ▀█▄█▀ ██▀▀▀   ██   ██    \n// ▄▀  ██▀██ ██ ██ ▀████   ██   ██▄▄▄ \n"
+
+// bannerFor returns the ASCII banner in the comment syntax of the target
+// config language: hyprlang and mango use '#', KDL only accepts '//'.
+func bannerFor(gen ipc.ConfigGenerator) string {
+	switch gen.(type) {
+	case *niri.Generator:
+		return kdlBanner
+	default:
+		return confBanner
+	}
+}
+
 type ConfigHandler struct {
 	compositor ipc.Compositor
 	generator  ipc.ConfigGenerator
@@ -62,7 +75,7 @@ func (h *ConfigHandler) ApplyConfig(payload ipc.ConfigUniversal) error {
 	layerStr := h.generator.GenerateLayerRules(payload.LayerRules)
 
 	var fullConfig strings.Builder
-	fullConfig.WriteString(confBanner)
+	fullConfig.WriteString(bannerFor(h.generator))
 	fullConfig.WriteString(startupStr)
 	if startupStr != "" {
 		fullConfig.WriteString("\n")
@@ -127,11 +140,12 @@ func (h *ConfigHandler) ApplyConfig(payload ipc.ConfigUniversal) error {
 }
 
 func (h *ConfigHandler) loadGeneratedConfig(path string) error {
-	type loader interface {
-		LoadConfig(path string) error
+	// Always reload the compositor's current config root. The generated
+	// file is designed to be included from the user's own config; switching
+	// the root to it (niri's LoadConfigFile with a path, mango's
+	// load_config_file) would replace the user's config until restart.
+	if rl, ok := h.compositor.(interface{ ReloadConfig() error }); ok {
+		return rl.ReloadConfig()
 	}
-	if l, ok := h.compositor.(loader); ok {
-		return l.LoadConfig(path)
-	}
-	return h.compositor.ReloadConfig()
+	return nil
 }

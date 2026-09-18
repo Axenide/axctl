@@ -56,15 +56,21 @@ func TestDefaultOutputPathIsHyprland(t *testing.T) {
 
 type fakeLoader struct {
 	*mock.Compositor
-	path string
+	path     string
+	reloaded bool
 }
 
-func (f *fakeLoader) LoadConfig(path string) error {
-	f.path = path
-	return f.Compositor.LoadConfig(path)
+func (f *fakeLoader) LoadConfig(p string) error {
+	f.path = p
+	return f.Compositor.LoadConfig(p)
 }
 
-func TestConfigHandlerWritesNiriAndCallsLoadConfig(t *testing.T) {
+func (f *fakeLoader) ReloadConfig() error {
+	f.reloaded = true
+	return f.Compositor.ReloadConfig()
+}
+
+func TestConfigHandlerWritesNiriAndReloads(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
 
@@ -85,10 +91,18 @@ func TestConfigHandlerWritesNiriAndCallsLoadConfig(t *testing.T) {
 		t.Fatalf("ApplyConfig: %v", err)
 	}
 
-	want := filepath.Join(dir, "niri", "axctl.generated.kdl")
-	if loader.path != want {
-		t.Fatalf("LoadConfig called with %q, want %q", loader.path, want)
+	// The generated file is included from the user's config.kdl, so the
+	// handler must reload the current root — never switch the root to the
+	// generated file (niri LoadConfigFile with a path drops the user's
+	// config until restart).
+	if !loader.reloaded {
+		t.Fatal("expected ReloadConfig to be called for the current config root")
 	}
+	if loader.path != "" {
+		t.Fatalf("LoadConfig must not be called with the generated path, got %q", loader.path)
+	}
+
+	want := filepath.Join(dir, "niri", "axctl.generated.kdl")
 
 	data, err := os.ReadFile(want)
 	if err != nil {
@@ -104,9 +118,15 @@ func TestConfigHandlerWritesNiriAndCallsLoadConfig(t *testing.T) {
 	if !strings.Contains(content, `spawn-at-startup "waybar"`) {
 		t.Fatalf("expected spawn-at-startup, got: %s", content)
 	}
+	if !strings.HasPrefix(content, "// ") {
+		t.Fatalf("expected KDL banner comment, got: %q", content[:40])
+	}
+	if strings.Contains(content, "# ▄") {
+		t.Fatalf("hyprlang '#' banner leaked into KDL config: %s", content)
+	}
 }
 
-func TestConfigHandlerWritesMangoAndCallsLoadConfig(t *testing.T) {
+func TestConfigHandlerWritesMangoAndReloads(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
 
@@ -139,8 +159,8 @@ func TestConfigHandlerWritesMangoAndCallsLoadConfig(t *testing.T) {
 	}
 
 	want := filepath.Join(dir, "mango", "axctl.generated.conf")
-	if loader.path != want {
-		t.Fatalf("LoadConfig called with %q, want %q", loader.path, want)
+	if !loader.reloaded || loader.path != "" {
+		t.Fatalf("expected ReloadConfig for the current root, reloaded=%v loadPath=%q", loader.reloaded, loader.path)
 	}
 
 	data, err := os.ReadFile(want)
@@ -175,7 +195,7 @@ func TestNiriClientImplementsLoadConfig(t *testing.T) {
 		LoadConfig(path string) error
 	}
 	if _, ok := c.(loader); !ok {
-		t.Fatal("Niri must implement LoadConfig for the generated config path to be applied")
+		t.Fatal("Niri must implement LoadConfig as part of its client API (the handler uses ReloadConfig)")
 	}
 }
 

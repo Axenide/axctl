@@ -224,12 +224,12 @@ func TestNiriMapKeyXF86Passthrough(t *testing.T) {
 // hex, so the wrapper must be unwrapped here.
 func TestNiriParseColorRGBWrapper(t *testing.T) {
 	cases := map[string]string{
-		"rgb(87abf8)":      "#87abf8ff",
-		"rgba(87abf880)":   "#87abf880",
-		"rgb(272937)":      "#272937ff",
-		"#abcdef":          "#abcdefff",
-		"#abcdef80":        "#abcdef80",
-		"":                 "",
+		"rgb(87abf8)":    "#87abf8ff",
+		"rgba(87abf880)": "#87abf880",
+		"rgb(272937)":    "#272937ff",
+		"#abcdef":        "#abcdefff",
+		"#abcdef80":      "#abcdef80",
+		"":               "",
 	}
 	for in, want := range cases {
 		if got := niriParseColor(in); got != want {
@@ -237,6 +237,7 @@ func TestNiriParseColorRGBWrapper(t *testing.T) {
 		}
 	}
 }
+
 // a lid switch keybind into GenerateKeybinds must not produce any "switch:"
 // a lid switch keybind into GenerateKeybinds must not produce a bind block
 // for it. The skipped bind is reported in a comment so the user can wire
@@ -260,5 +261,87 @@ func TestKeybindsSkipsUnsupportedLidSwitch(t *testing.T) {
 	}
 	if !strings.Contains(out, "// Skipped binds") {
 		t.Errorf("expected skipped binds comment, got: %s", out)
+	}
+}
+
+func TestGenerateKeybindsCompositorDispatchers(t *testing.T) {
+	g := &Generator{}
+	bind := func(dispatcher, argument string) string {
+		out := g.GenerateKeybinds(ipc.ConfigKeybinds{
+			Custom: []ipc.Keybind{{Modifiers: []string{"SUPER"}, Key: "Q", Dispatcher: dispatcher, Argument: argument, Enabled: true}},
+		})
+		return out
+	}
+	cases := map[string]string{
+		"killactive":              "close-window",
+		"exit":                    "quit",
+		"workspace 3":             "focus-workspace 3",
+		"workspace e+1":           "focus-workspace-down",
+		"workspace e-1":           "focus-workspace-up",
+		"workspace chat":          `focus-workspace "chat"`,
+		"movefocus l":             "focus-column-left",
+		"movefocus r":             "focus-column-right",
+		"movefocus u":             "focus-window-up",
+		"movefocus d":             "focus-window-down",
+		"movewindow l":            "move-column-left",
+		"movewindow d":            "move-window-down",
+		"movetoworkspace 5":       "move-window-to-workspace 5",
+		"movetoworkspace e+1":     "move-window-to-workspace-down",
+		"movetoworkspacesilent 7": "move-window-to-workspace 7 focus=false",
+		"resizeactive -20 0":      `set-column-width "-20"`,
+		"resizeactive 0 -15":      `set-window-height "-15"`,
+	}
+	for input, want := range cases {
+		parts := strings.Fields(input)
+		dispatcher := parts[0]
+		argument := strings.TrimPrefix(input, dispatcher)
+		argument = strings.TrimSpace(argument)
+		out := bind(dispatcher, argument)
+		if !strings.Contains(out, want) {
+			t.Fatalf("%q: expected %q in output:\n%s", input, want, out)
+		}
+	}
+}
+
+func TestGenerateKeybindsSkipsHyprlandOnly(t *testing.T) {
+	g := &Generator{}
+	out := g.GenerateKeybinds(ipc.ConfigKeybinds{
+		Custom: []ipc.Keybind{
+			{Modifiers: []string{"SUPER"}, Key: "Q", Dispatcher: "togglespecialworkspace", Enabled: true},
+			{Modifiers: []string{"SUPER"}, Key: "W", Dispatcher: "layoutmsg", Argument: "togglesplit", Enabled: true},
+			{Modifiers: []string{"SUPER"}, Key: "E", Dispatcher: "movefocus", Argument: "x", Enabled: true},
+		},
+	})
+	if strings.Contains(out, "SUPER+Q {") || strings.Contains(out, "SUPER+W {") || strings.Contains(out, "SUPER+E {") {
+		t.Fatalf("hyprland-only binds must be skipped:\n%s", out)
+	}
+	if !strings.Contains(out, "Skipped binds") {
+		t.Fatalf("expected skipped comment, got:\n%s", out)
+	}
+}
+
+func TestGenerateAppearanceBorderOnAndFocusRingOff(t *testing.T) {
+	g := &Generator{}
+	out := g.GenerateAppearance(ipc.ConfigAppearance{
+		Border: &ipc.Border{Width: intPtr(2), ActiveColor: strPtr("#ff0000")},
+	})
+	if !strings.Contains(out, "focus-ring {\n        off\n    }") {
+		t.Fatalf("expected focus-ring off when border is managed, got:\n%s", out)
+	}
+	if !strings.Contains(out, "border {\n        on\n") {
+		t.Fatalf("expected border on flag, got:\n%s", out)
+	}
+}
+
+func TestGenerateAppearanceRoundingWindowRule(t *testing.T) {
+	g := &Generator{}
+	out := g.GenerateAppearance(ipc.ConfigAppearance{
+		Border: &ipc.Border{Rounding: intPtr(12)},
+	})
+	if !strings.Contains(out, "window-rule {\n    geometry-corner-radius 12\n    clip-to-geometry true\n}") {
+		t.Fatalf("expected global rounding window-rule, got:\n%s", out)
+	}
+	if strings.Contains(out, "border rounding") {
+		t.Fatalf("rounding should no longer be listed as unsupported:\n%s", out)
 	}
 }
