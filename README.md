@@ -70,6 +70,10 @@ nix run
 ./axctl subscribe
 ```
 
+> **Niri users:** for Super-alone binds (e.g. Super opens the launcher),
+> add yourself to the `input` group first — see
+> [Modifier-alone binds](#modifier-alone-binds-niri).
+
 ## Usage guide
 
 General form:
@@ -234,11 +238,20 @@ without any other key press in between.
 
 Requirements:
 
-- The daemon user must be able to read `/dev/input/event*` — add the user
-  to the `input` group and log back in.
+- **The daemon user must be in the `input` group** to read
+  `/dev/input/event*`:
+
+  ```sh
+  sudo usermod -aG input "$USER"
+  ```
+
+  Then log out and back in (the change does not apply to running
+  sessions). Verify with: `id | tr ',' '\n' | grep -w input`.
 - Declare the bind normally in the config (key `Super_L` with modifiers
   `[SUPER]`); it is skipped in the generated niri config and handled by the
-  monitor instead.
+  monitor instead. Without the group, the daemon logs a warning and
+  modifier-alone binds stay disabled.
+- Check the live state with `axctl system keymon-status`.
 
 ## Troubleshooting
 
@@ -250,6 +263,10 @@ Requirements:
     set (see Environment and sockets).
 - `Error connecting to daemon`
   - Start the daemon with `axctl daemon` and verify the socket exists.
+- Super-alone binds do nothing on niri
+  - The user must be in the `input` group (log back in after adding it).
+    Check `axctl system keymon-status`: it lists the registered binds, the
+    opened `/dev/input` devices, and any per-device errors.
 
 ## Development
 
