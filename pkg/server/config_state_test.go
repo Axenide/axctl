@@ -145,3 +145,35 @@ func TestConfigStateApplyKeybinds(t *testing.T) {
 		t.Fatal("cached state should reflect the merge")
 	}
 }
+
+func TestKeymonBindsFromPayload(t *testing.T) {
+	s := seededConfigState()
+	s.Seed(ipc.ConfigUniversal{
+		Keybinds: ipc.ConfigKeybinds{
+			Ambxst: &ipc.AmbxstKeybinds{
+				System: map[string]ipc.Keybind{
+					"launcher": {Modifiers: []string{"SUPER"}, Key: "Super_L", Dispatcher: "exec", Argument: "ambxst run launcher", Enabled: true},
+				},
+			},
+			Custom: []ipc.Keybind{
+				{Modifiers: []string{"SUPER"}, Key: "Super_R", Dispatcher: "exec", Argument: "other", Enabled: true},
+				{Modifiers: []string{"SUPER", "SHIFT"}, Key: "Super_L", Dispatcher: "exec", Argument: "combo", Enabled: true},
+				{Modifiers: []string{"ALT"}, Key: "Alt_L", Dispatcher: "killactive", Argument: "x", Enabled: true},
+				{Modifiers: []string{"SUPER"}, Key: "Super_L", Dispatcher: "exec", Argument: "disabled", Enabled: false},
+				{Modifiers: []string{"SUPER"}, Key: "T", Dispatcher: "exec", Argument: "foot", Enabled: true},
+			},
+		},
+	})
+
+	payload, _ := s.Current()
+	binds := keymonBindsFromPayload(payload)
+	if binds["SUPER"] != "other" {
+		t.Fatalf("SUPER = %q, want other (last enabled modifier-self bind wins)", binds["SUPER"])
+	}
+	if _, ok := binds["ALT"]; ok {
+		t.Fatalf("non-exec dispatchers must not register: %v", binds)
+	}
+	if len(binds) != 1 {
+		t.Fatalf("binds = %v, want only SUPER", binds)
+	}
+}

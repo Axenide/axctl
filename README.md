@@ -223,6 +223,23 @@ The daemon listens on:
 
 `/tmp/axctl-$UID.sock`
 
+## Modifier-alone binds (niri)
+
+Niri fires keybinds on key press only, so a bind on the modifier key itself
+(e.g. `Mod+Super_L` for a Super-alone app launcher) would trigger on every
+Super press and interfere with Super+key combos. Instead, axctl detects
+modifier-alone presses by observing `/dev/input` events (read-only; no
+grab, no uinput) and runs the bound command when the modifier is released
+without any other key press in between.
+
+Requirements:
+
+- The daemon user must be able to read `/dev/input/event*` — add the user
+  to the `input` group and log back in.
+- Declare the bind normally in the config (key `Super_L` with modifiers
+  `[SUPER]`); it is skipped in the generated niri config and handled by the
+  monitor instead.
+
 ## Troubleshooting
 
 - `Error: axctl daemon is already running.`

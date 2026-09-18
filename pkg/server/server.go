@@ -11,6 +11,7 @@ import (
 	"axctl/pkg/ipc/hyprland"
 	"axctl/pkg/ipc/mango"
 	"axctl/pkg/ipc/niri"
+	"axctl/pkg/keymon"
 )
 
 type Server struct {
@@ -18,6 +19,7 @@ type Server struct {
 	socketPath string
 	cache      *ipc.StateCache
 	cfgState   *ConfigState
+	keyMon     *keymon.Monitor
 	clients    map[net.Conn]struct{}
 	clientsMu  sync.RWMutex
 	idleMgr    *IdleManager
@@ -34,6 +36,7 @@ func New(c ipc.Compositor, path string) *Server {
 		socketPath: path,
 		cache:      ipc.NewStateCache(),
 		cfgState:   NewConfigState(),
+		keyMon:     keymon.NewMonitor(),
 		clients:    make(map[net.Conn]struct{}),
 		idleMgr:    idleMgr,
 	}
@@ -72,6 +75,20 @@ func (s *Server) initCache() {
 // and on reload.
 func (s *Server) SeedConfigState(payload ipc.ConfigUniversal) {
 	s.cfgState.Seed(payload)
+	s.syncKeyMonitor()
+}
+
+// syncKeyMonitor re-registers the modifier-alone binds (e.g. Super_L with
+// SUPER) from the cached config payload. Those binds are skipped in
+// generated niri configs — niri fires binds on press only — so the keymon
+// evdev monitor implements the "press the modifier alone" behavior instead.
+func (s *Server) syncKeyMonitor() {
+	payload, ok := s.cfgState.Current()
+	if !ok {
+		s.keyMon.SetBinds(map[string]string{})
+		return
+	}
+	s.keyMon.SetBinds(keymonBindsFromPayload(payload))
 }
 
 func (s *Server) isNiri() bool {
@@ -88,7 +105,11 @@ func (s *Server) applyNiriConfig(mutate func(state *ConfigState) (ipc.ConfigUniv
 	if err != nil {
 		return err
 	}
-	return NewConfigHandler(s.compositor).ApplyConfig(payload)
+	if err := NewConfigHandler(s.compositor).ApplyConfig(payload); err != nil {
+		return err
+	}
+	s.syncKeyMonitor()
+	return nil
 }
 
 func (s *Server) listLayouts() (ipc.Layouts, error) {
@@ -710,6 +731,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 			err = handler.ApplyConfig(payload)
 			if err == nil {
 				s.cfgState.Seed(payload)
+				s.syncKeyMonitor()
 			}
 
 		case "Config.Batch":
