@@ -126,6 +126,43 @@ func kdlQuote(s string) string {
 	return "\"" + escaped + "\""
 }
 
+// niriModifierSelfBind reports whether a bind's trigger key is a modifier
+// key included in its own modifier set (e.g. Mod+Super_L). Niri fires binds
+// on key press only — there is no release-based trigger — so such a bind
+// would fire on every press of the modifier and interfere with
+// modifier+key combos. The second return is the reason for the skip.
+func niriModifierSelfBind(key string, mods []string) (string, bool) {
+	has := func(names ...string) bool {
+		for _, m := range mods {
+			for _, n := range names {
+				if strings.EqualFold(m, n) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	switch key {
+	case "Super_L", "Super_R":
+		if has("SUPER", "MOD") {
+			return "niri fires binds on press, so binding the modifier key itself would trigger on every Super press and interfere with Super+key combos; niri has no press-Super-alone (release-based) bind support", true
+		}
+	case "Alt_L", "Alt_R":
+		if has("ALT") {
+			return "niri fires binds on press, so binding the modifier key itself would trigger on every Alt press; niri has no release-based bind support", true
+		}
+	case "Control_L", "Control_R":
+		if has("CTRL", "CONTROL") {
+			return "niri fires binds on press, so binding the modifier key itself would trigger on every Ctrl press; niri has no release-based bind support", true
+		}
+	case "Shift_L", "Shift_R":
+		if has("SHIFT") {
+			return "niri fires binds on press, so binding the modifier key itself would trigger on every Shift press; niri has no release-based bind support", true
+		}
+	}
+	return "", false
+}
+
 var niriDispatchers = map[string]string{
 	"exec":                         "spawn",
 	"spawn":                        "spawn",
@@ -448,6 +485,10 @@ func (g *Generator) GenerateKeybinds(config ipc.ConfigKeybinds) string {
 		key, ok := niriMapKey(kb.Key)
 		if !ok {
 			skipped = append(skipped, fmt.Sprintf("%s — %s (key %q has no niri equivalent)", comment, kb.Dispatcher, kb.Key))
+			return
+		}
+		if reason, bad := niriModifierSelfBind(key, kb.Modifiers); bad {
+			skipped = append(skipped, fmt.Sprintf("%s — %s (key %q: %s)", comment, kb.Dispatcher, kb.Key, reason))
 			return
 		}
 		arg := kb.Argument

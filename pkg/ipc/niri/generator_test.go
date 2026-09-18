@@ -345,3 +345,26 @@ func TestGenerateAppearanceRoundingWindowRule(t *testing.T) {
 		t.Fatalf("rounding should no longer be listed as unsupported:\n%s", out)
 	}
 }
+
+func TestGenerateKeybindsSkipsModifierSelfBind(t *testing.T) {
+	g := &Generator{}
+	out := g.GenerateKeybinds(ipc.ConfigKeybinds{
+		Custom: []ipc.Keybind{
+			{Modifiers: []string{"SUPER"}, Key: "Super_L", Dispatcher: "exec", Argument: "ambxst run launcher", Enabled: true},
+			{Modifiers: []string{"ALT"}, Key: "Alt_L", Dispatcher: "exec", Argument: "true", Enabled: true},
+			{Modifiers: []string{"SUPER"}, Key: "T", Dispatcher: "exec", Argument: "foot", Enabled: true},
+		},
+	})
+	if strings.Contains(out, "Mod+Super_L") {
+		t.Fatalf("modifier-self bind must be skipped (niri fires binds on press):\n%s", out)
+	}
+	if strings.Contains(out, "Alt+Alt_L") {
+		t.Fatalf("Alt-self bind must be skipped:\n%s", out)
+	}
+	if !strings.Contains(out, "Mod+T") {
+		t.Fatalf("normal binds must survive:\n%s", out)
+	}
+	if !strings.Contains(out, "fires binds on press") {
+		t.Fatalf("expected explanatory skip comment:\n%s", out)
+	}
+}
