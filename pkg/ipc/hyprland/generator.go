@@ -395,6 +395,12 @@ func (g *Generator) GenerateLayerRules(rules []ipc.LayerRule) string {
 			props = append(props, "no_shadow on")
 		}
 
+		if len(props) == 0 {
+			// No renderable property (e.g. niri-only place-within-backdrop):
+			// a match-only rule is a no-op in Hyprland, skip it entirely.
+			continue
+		}
+
 		matchStr := fmt.Sprintf("match:namespace %s", r.Namespace)
 		props = append(props, matchStr)
 

@@ -20,6 +20,12 @@ func TestGenerateAppearanceGapsAndBorder(t *testing.T) {
 	if !strings.Contains(out, "layout {") {
 		t.Fatalf("expected layout block, got: %s", out)
 	}
+	if !strings.Contains(out, `background-color "transparent"`) {
+		t.Fatalf("expected transparent layout background, got: %s", out)
+	}
+	if !strings.Contains(out, "workspace-shadow {\n        off") {
+		t.Fatalf("expected overview workspace-shadow off, got: %s", out)
+	}
 	if !strings.Contains(out, "gaps 8") {
 		t.Fatalf("expected gaps 8, got: %s", out)
 	}
@@ -160,6 +166,30 @@ func TestGenerateLayerRulesIsNoOp(t *testing.T) {
 	g := &Generator{}
 	out := g.GenerateLayerRules([]ipc.LayerRule{{Namespace: "foo"}})
 	if !strings.Contains(out, "not supported") {
+		t.Fatalf("expected unsupported comment, got: %s", out)
+	}
+}
+
+func TestGenerateLayerRulesPlaceWithinBackdrop(t *testing.T) {
+	g := &Generator{}
+	yes := true
+	out := g.GenerateLayerRules([]ipc.LayerRule{
+		{Namespace: "^ambxst:wallpaper$", PlaceWithinBackdrop: &yes},
+	})
+	if !strings.Contains(out, "layer-rule {") ||
+		!strings.Contains(out, `match namespace="^ambxst:wallpaper$"`) ||
+		!strings.Contains(out, "place-within-backdrop true") {
+		t.Fatalf("expected place-within-backdrop block, got: %s", out)
+	}
+}
+
+func TestGenerateLayerRulesUnsupportedPropsComment(t *testing.T) {
+	g := &Generator{}
+	yes := true
+	out := g.GenerateLayerRules([]ipc.LayerRule{
+		{Namespace: "quickshell", Blur: &yes, NoAnim: &yes},
+	})
+	if !strings.Contains(out, "not supported in niri: no_anim; blur") {
 		t.Fatalf("expected unsupported comment, got: %s", out)
 	}
 }

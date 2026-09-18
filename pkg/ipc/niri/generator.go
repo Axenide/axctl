@@ -395,6 +395,15 @@ func (g *Generator) GenerateAppearance(config ipc.ConfigAppearance) string {
 	b.WriteString("// Include this file from your niri config with: include \"<this-file>\"\n\n")
 
 	hasLayout := false
+	// Transparent workspace background: the ambxst:wallpaper layer rule
+	// places the wallpaper into the overview backdrop, and a transparent
+	// layout background lets it show through the workspace preview cells.
+	// In the normal view the wallpaper layer renders above this anyway.
+	if !hasLayout {
+		b.WriteString("layout {\n")
+		hasLayout = true
+	}
+	b.WriteString("    background-color \"transparent\"\n")
 	if config.Gaps != nil && config.Gaps.Inner != nil {
 		if !hasLayout {
 			b.WriteString("layout {\n")
@@ -432,6 +441,12 @@ func (g *Generator) GenerateAppearance(config ipc.ConfigAppearance) string {
 	if hasLayout {
 		b.WriteString("}\n\n")
 	}
+
+	// No shadows around the workspace previews: with the transparent
+	// workspace background and the wallpaper backdrop they read as noise.
+	// This is the overview-specific shadow (layout.shadow only affects
+	// windows and does not reach these previews).
+	b.WriteString("overview {\n    workspace-shadow {\n        off\n    }\n}\n\n")
 
 	// Rounding is applied to all windows via a match-less window-rule.
 	if config.Border != nil && config.Border.Rounding != nil {
@@ -689,8 +704,53 @@ func convertNiriMatch(m string) string {
 	return fmt.Sprintf("%s=%s", prop, kdlQuote(val))
 }
 
+// GenerateLayerRules emits niri layer-rule blocks. Niri's layer rules
+// cover a subset of the generic properties: namespace matching and
+// place-within-backdrop. Rules carrying other properties (blur,
+// no_anim, ...) are listed as unsupported comments so nothing is lost
+// silently.
 func (g *Generator) GenerateLayerRules(rules []ipc.LayerRule) string {
-	return "// Layer rules not supported in niri\n"
+	var b strings.Builder
+	for _, r := range rules {
+		if r.Namespace == "" {
+			continue
+		}
+		var unsupported []string
+		if r.NoAnim != nil && *r.NoAnim {
+			unsupported = append(unsupported, "no_anim")
+		}
+		if r.Blur != nil && *r.Blur {
+			unsupported = append(unsupported, "blur")
+		}
+		if r.BlurPopups != nil && *r.BlurPopups {
+			unsupported = append(unsupported, "blur_popups")
+		}
+		if r.IgnoreAlpha != nil && *r.IgnoreAlpha {
+			unsupported = append(unsupported, "ignore_alpha")
+		}
+		if r.IgnoreZeroAlpha != nil && *r.IgnoreZeroAlpha {
+			unsupported = append(unsupported, "ignore_zero_alpha")
+		}
+		if r.NoShadow != nil && *r.NoShadow {
+			unsupported = append(unsupported, "no_shadow")
+		}
+		if r.PlaceWithinBackdrop != nil && *r.PlaceWithinBackdrop {
+			b.WriteString("layer-rule {\n")
+			fmt.Fprintf(&b, "    match namespace=%s\n", kdlQuote(r.Namespace))
+			b.WriteString("    place-within-backdrop true\n")
+			b.WriteString("}\n\n")
+			if len(unsupported) > 0 {
+				b.WriteString(fmt.Sprintf("// Layer rule %s: unsupported properties ignored in niri: %s\n\n", kdlQuote(r.Namespace), strings.Join(unsupported, "; ")))
+			}
+			continue
+		}
+		if len(unsupported) > 0 {
+			b.WriteString(fmt.Sprintf("// Layer rule %s: not supported in niri: %s\n", kdlQuote(r.Namespace), strings.Join(unsupported, "; ")))
+		} else {
+			b.WriteString(fmt.Sprintf("// Layer rule %s: not supported in niri\n", kdlQuote(r.Namespace)))
+		}
+	}
+	return b.String()
 }
 
 func (g *Generator) GenerateStartup(exec []string, execOnce []string) string {

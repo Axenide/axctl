@@ -171,7 +171,10 @@ type LayerRule struct {
 	NoShadow         *bool    `json:"no_shadow,omitempty"`
 	IgnoreZeroAlpha  *bool    `json:"ignore_zero_alpha,omitempty"`
 	IgnoreAlphaValue *float64 `json:"ignore_alpha_value,omitempty"`
-	Namespace        string   `json:"namespace"`
+	// PlaceWithinBackdrop moves the layer surface into niri's overview
+	// backdrop (niri-only). Niri-specific: other compositors ignore it.
+	PlaceWithinBackdrop *bool  `json:"place_within_backdrop,omitempty"`
+	Namespace           string `json:"namespace"`
 }
 
 // ConfigUniversal holds the entire configuration state

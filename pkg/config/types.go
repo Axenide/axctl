@@ -159,6 +159,9 @@ type LayerRuleConfig struct {
 	IgnoreZeroAlpha *bool `toml:"ignore_zero_alpha,omitempty"`
 	// IgnoreAlphaValue sets a threshold for alpha value to be treated as opaque.
 	IgnoreAlphaValue *float64 `toml:"ignore_alpha_value,omitempty"`
+	// PlaceWithinBackdrop moves the layer surface into niri's overview
+	// backdrop. Niri-only; other compositors ignore it.
+	PlaceWithinBackdrop *bool `toml:"place_within_backdrop,omitempty"`
 	// Namespace matches against the layer's namespace (e.g., "notifications", "waybar").
 	Namespace string `toml:"namespace"`
 }
@@ -208,14 +211,15 @@ func (c *TOMLConfig) ToIPCConfig() ipc.ConfigUniversal {
 
 	for _, lr := range c.LayerRules {
 		cfg.LayerRules = append(cfg.LayerRules, ipc.LayerRule{
-			NoAnim:           lr.NoAnim,
-			Blur:             lr.Blur,
-			BlurPopups:       lr.BlurPopups,
-			IgnoreAlpha:      lr.IgnoreAlpha,
-			NoShadow:         lr.NoShadow,
-			IgnoreZeroAlpha:  lr.IgnoreZeroAlpha,
-			IgnoreAlphaValue: lr.IgnoreAlphaValue,
-			Namespace:        lr.Namespace,
+			NoAnim:              lr.NoAnim,
+			Blur:                lr.Blur,
+			BlurPopups:          lr.BlurPopups,
+			IgnoreAlpha:         lr.IgnoreAlpha,
+			NoShadow:            lr.NoShadow,
+			IgnoreZeroAlpha:     lr.IgnoreZeroAlpha,
+			IgnoreAlphaValue:    lr.IgnoreAlphaValue,
+			PlaceWithinBackdrop: lr.PlaceWithinBackdrop,
+			Namespace:           lr.Namespace,
 		})
 	}
 
