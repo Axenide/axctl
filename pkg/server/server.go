@@ -23,6 +23,9 @@ type Server struct {
 	clients    map[net.Conn]struct{}
 	clientsMu  sync.RWMutex
 	idleMgr    *IdleManager
+
+	mu           sync.RWMutex
+	overviewOpen *bool
 }
 
 func New(c ipc.Compositor, path string) *Server {
@@ -333,6 +336,13 @@ func (s *Server) watchEvents() {
 		case ipc.EventFocusedMonitorChanged:
 			s.initCache()
 			s.broadcastEvent("Event.FocusedMonitorChanged", e.Payload)
+		case ipc.EventOverviewChanged:
+			if open, ok := e.Payload["is_open"].(bool); ok {
+				s.mu.Lock()
+				s.overviewOpen = &open
+				s.mu.Unlock()
+			}
+			s.broadcastEvent("Event.OverviewChanged", e.Payload)
 		default:
 			// Check if this is a floating mode change (has address + floating in payload)
 			if addr, ok := e.Payload["address"].(string); ok {
@@ -1364,9 +1374,10 @@ case "Brightness.Set":
 }
 
 type StateDump struct {
-	Windows    []ipc.Window    `json:"windows"`
-	Workspaces []ipc.Workspace `json:"workspaces"`
-	Monitors   []ipc.Monitor   `json:"monitors"`
+	Windows      []ipc.Window    `json:"windows"`
+	Workspaces   []ipc.Workspace `json:"workspaces"`
+	Monitors     []ipc.Monitor   `json:"monitors"`
+	OverviewOpen *bool           `json:"overview_open,omitempty"`
 }
 
 type Notification struct {
@@ -1374,6 +1385,12 @@ type Notification struct {
 	Method  string      `json:"method"`
 	Params  interface{} `json:"params,omitempty"`
 	State   *StateDump  `json:"state,omitempty"`
+}
+
+func (s *Server) getOverviewOpen() *bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.overviewOpen
 }
 
 func (s *Server) broadcastEvent(method string, params interface{}) {
@@ -1389,9 +1406,10 @@ func (s *Server) broadcastEvent(method string, params interface{}) {
 		Method:  method,
 		Params:  params,
 		State: &StateDump{
-			Windows:    s.cache.GetWindows(),
-			Workspaces: s.cache.GetWorkspaces(),
-			Monitors:   s.cache.GetMonitors(),
+			Windows:      s.cache.GetWindows(),
+			Workspaces:   s.cache.GetWorkspaces(),
+			Monitors:     s.cache.GetMonitors(),
+			OverviewOpen: s.getOverviewOpen(),
 		},
 	}
 

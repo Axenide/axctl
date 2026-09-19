@@ -89,6 +89,8 @@ const (
 	EventFullscreenChanged EventType = "fullscreen_changed"
 	// EventFocusedMonitorChanged is fired when the focused monitor changes.
 	EventFocusedMonitorChanged EventType = "focused_monitor_changed"
+	// EventOverviewChanged is fired when the compositor overview opens or closes.
+	EventOverviewChanged EventType = "overview_changed"
 )
 
 // Event represents a compositor event.

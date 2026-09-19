@@ -909,6 +909,7 @@ func (n *Niri) handleEvent(name string, data json.RawMessage, event *ipc.Event) 
 	case "KeyboardLayoutsChanged", "KeyboardLayoutSwitched":
 		event.Type = ipc.EventConfigReloaded
 	case "OverviewOpenedOrClosed":
+		event.Type = ipc.EventOverviewChanged
 		var d struct {
 			IsOpen bool `json:"is_open"`
 		}
