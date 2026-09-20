@@ -157,11 +157,6 @@ func (g *LuaGenerator) GenerateKeybindsLua(config ipc.ConfigKeybinds) string {
 		if !kb.Enabled || kb.Key == "" {
 			return
 		}
-		if ipc.ModifierSelfGroup(kb) != "" {
-			b.WriteString(fmt.Sprintf("-- %s+%s skipped: modifier-alone bind, handled by the axctl keymon monitor\n",
-				strings.Join(kb.Modifiers, " + "), kb.Key))
-			return
-		}
 		mods := strings.Join(kb.Modifiers, " + ")
 		key := kb.Key
 		dispatcher := kb.Dispatcher
@@ -177,10 +172,17 @@ func (g *LuaGenerator) GenerateKeybindsLua(config ipc.ConfigKeybinds) string {
 			keyStr = mods + " + " + key
 		}
 
+		luaFlags := bindFlagsToLua(kb.Flags)
+		if ipc.ModifierSelfGroup(kb) != "" && !strings.Contains(luaFlags, "release = true") {
+			if luaFlags != "" {
+				luaFlags += ", "
+			}
+			luaFlags += "release = true"
+		}
+
 		if dispatcher == "" || dispatcher == "exec" {
-			flags := bindFlagsToLua(kb.Flags)
-			if flags != "" {
-				b.WriteString(fmt.Sprintf("hl.bind(%s, hl.dsp.exec_cmd(%q), { %s })\n", luaQuote(keyStr), arg, flags))
+			if luaFlags != "" {
+				b.WriteString(fmt.Sprintf("hl.bind(%s, hl.dsp.exec_cmd(%q), { %s })\n", luaQuote(keyStr), arg, luaFlags))
 			} else if arg != "" {
 				b.WriteString(fmt.Sprintf("hl.bind(%s, hl.dsp.exec_cmd(%q))\n", luaQuote(keyStr), arg))
 			} else {
@@ -193,9 +195,8 @@ func (g *LuaGenerator) GenerateKeybindsLua(config ipc.ConfigKeybinds) string {
 		if isMouse {
 			b.WriteString(fmt.Sprintf("hl.bind(%s, %s, { mouse = true })\n", luaQuote(keyStr), actionLua))
 		} else {
-			flags := bindFlagsToLua(kb.Flags)
-			if flags != "" {
-				b.WriteString(fmt.Sprintf("hl.bind(%s, %s, { %s })\n", luaQuote(keyStr), actionLua, flags))
+			if luaFlags != "" {
+				b.WriteString(fmt.Sprintf("hl.bind(%s, %s, { %s })\n", luaQuote(keyStr), actionLua, luaFlags))
 			} else {
 				b.WriteString(fmt.Sprintf("hl.bind(%s, %s)\n", luaQuote(keyStr), actionLua))
 			}
@@ -237,13 +238,13 @@ func bindFlagsToLua(flags string) string {
 		switch strings.ToLower(f) {
 		case "l":
 			parts = append(parts, "locked = true")
-		case "e":
+		case "r":
 			parts = append(parts, "release = true")
 		case "n":
 			parts = append(parts, "non_consuming = true")
 		case "m":
 			parts = append(parts, "mouse = true")
-		case "r":
+		case "e":
 			parts = append(parts, "repeating = true")
 		}
 	}

@@ -36,7 +36,7 @@ curl -L get.axeni.de/axctl | sh
 
 On NixOS, the installer uses `nix profile add github:Axenide/axctl` instead of
 writing to `/usr/local/bin`. On other distros it also adds your user to the
-`input` group (needed for modifier-alone binds — see
+`input` group (needed for modifier-alone binds on niri — see
 [Modifier-alone binds](#modifier-alone-binds)).
 
 ### Build from source
@@ -72,8 +72,10 @@ nix run
 ./axctl subscribe
 ```
 
-> **Modifier-alone binds** (e.g. Super alone opens the launcher) need the
-> `input` group. The installer adds it automatically; see
+> **Modifier-alone binds** (e.g. Super alone opens the launcher) are emitted
+> as native release binds on Hyprland and MangoWC, and handled by axctl's
+> evdev monitor on niri — the latter needs the `input` group, which the
+> installer adds automatically; see
 > [Modifier-alone binds](#modifier-alone-binds).
 
 ## Usage guide
@@ -243,14 +245,24 @@ The daemon listens on:
 ## Modifier-alone binds
 
 A bind on the modifier key itself (e.g. `Super_L` with modifiers `[SUPER]`
-for a Super-alone app launcher) cannot be expressed by compositors without
-interfering with modifier+key combos. axctl therefore skips such binds in
-every generated compositor config (niri, Hyprland, MangoWC) and detects
-modifier-alone presses itself by observing `/dev/input` events (read-only;
-no grab, no uinput), running the bound command when the modifier is
-released without any other key press in between.
+for a Super-alone app launcher) means "fire when the modifier is released
+without any other key press in between".
 
-Requirements:
+How it is implemented depends on the compositor:
+
+- **Hyprland / MangoWC** — emitted as a native release bind
+  (`bindr = SUPER, Super_L, ...`). Both compositors suppress the trigger
+  when another key was pressed while the modifier was held, so the bind
+  behaves like a plain config bind: it can be unbound or overridden later
+  in the user's own config, and it keeps working for keyboards connected
+  after the daemon starts.
+- **niri** — niri only fires binds on key press and has no release-based
+  trigger, so such binds are skipped in the generated config and the axctl
+  daemon implements the behavior itself by observing `/dev/input` events
+  (read-only; no grab, no uinput), running the bound command when the
+  modifier is released alone.
+
+Niri requirements:
 
 - **The daemon user must be in the `input` group** to read
   `/dev/input/event*`. The installer adds the group automatically; for
@@ -264,8 +276,8 @@ Requirements:
   log out and back in (the change does not apply to running sessions).
   Verify with: `id | tr ',' '\n' | grep -w input`.
 - Declare the bind normally in the config (key `Super_L` with modifiers
-  `[SUPER]`); it is skipped in the generated compositor config and handled
-  by the monitor instead. Without the group, the daemon logs a warning and
+  `[SUPER]`); it is skipped in the generated niri config and handled by the
+  monitor instead. Without the group, the daemon logs a warning and
   modifier-alone binds stay disabled.
 - Keyboards connected after the daemon starts are not monitored; restart
   the daemon to pick them up.
@@ -281,10 +293,14 @@ Requirements:
     set (see Environment and sockets).
 - `Error connecting to daemon`
   - Start the daemon with `axctl daemon` and verify the socket exists.
-- Super-alone binds do nothing
+- Super-alone binds do nothing (niri)
   - The user must be in the `input` group (log back in after adding it).
     Check `axctl system keymon-status`: it lists the registered binds, the
     opened `/dev/input` devices, and any per-device errors.
+- Super-alone binds do nothing (Hyprland / MangoWC)
+  - These are plain release binds (`bindr`); check the generated config and
+    `hyprctl binds` (or the MangoWC equivalent) for the `Super_L` entry, and
+    make sure no later bind or user config overrides it.
 
 ## Development
 

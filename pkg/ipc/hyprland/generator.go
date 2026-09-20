@@ -210,11 +210,6 @@ func (g *Generator) GenerateKeybinds(config ipc.ConfigKeybinds) string {
 		if !kb.Enabled || kb.Key == "" {
 			return
 		}
-		if ipc.ModifierSelfGroup(kb) != "" {
-			out.WriteString(fmt.Sprintf("# %s+%s skipped: modifier-alone bind, handled by the axctl keymon monitor\n",
-				strings.Join(kb.Modifiers, "+"), kb.Key))
-			return
-		}
 		mod := formatModifiers(kb.Modifiers)
 		dispatcher := kb.Dispatcher
 		if dispatcher == "" {
@@ -225,6 +220,11 @@ func (g *Generator) GenerateKeybinds(config ipc.ConfigKeybinds) string {
 		bindKw := "bind"
 		if strings.HasPrefix(strings.ToLower(kb.Key), "mouse:") {
 			bindKw = "bindm"
+		} else if ipc.ModifierSelfGroup(kb) != "" {
+			// Hyprland fires release binds only when no other key was
+			// pressed while the modifier was held, which is exactly the
+			// modifier-alone semantics we want.
+			bindKw = "bindr"
 		}
 
 		mod = strings.ReplaceAll(mod, "SUPER", "SUPER")

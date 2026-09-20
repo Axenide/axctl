@@ -189,7 +189,7 @@ func TestLuaAppearanceWorkspaceStyleEmptyFallsBack(t *testing.T) {
 	}
 }
 
-func TestLuaKeybindsSkipModifierSelf(t *testing.T) {
+func TestLuaKeybindsModifierSelfUsesReleaseFlag(t *testing.T) {
 	gen := &LuaGenerator{}
 	out := gen.GenerateKeybindsLua(ipc.ConfigKeybinds{
 		Custom: []ipc.Keybind{
@@ -197,13 +197,13 @@ func TestLuaKeybindsSkipModifierSelf(t *testing.T) {
 			{Modifiers: []string{"SUPER"}, Key: "Q", Dispatcher: "exec", Argument: "kitty", Enabled: true},
 		},
 	})
-	if strings.Contains(out, `hl.bind("SUPER + Super_L"`) {
-		t.Fatalf("modifier-self bind should be skipped, got: %s", out)
+	if !strings.Contains(out, `hl.bind("SUPER + Super_L", hl.dsp.exec_cmd("ambxst run launcher"), { release = true })`) {
+		t.Fatalf("modifier-self bind should use the release flag, got: %s", out)
 	}
 	if !strings.Contains(out, `hl.bind("SUPER + Q", hl.dsp.exec_cmd("kitty"))`) {
 		t.Fatalf("ordinary bind should be kept, got: %s", out)
 	}
-	if !strings.Contains(out, "handled by the axctl keymon monitor") {
-		t.Fatalf("expected skip comment, got: %s", out)
+	if strings.Contains(out, "keymon") {
+		t.Fatalf("modifier-self binds are compositor-native now, got: %s", out)
 	}
 }

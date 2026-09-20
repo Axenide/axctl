@@ -221,19 +221,16 @@ func (g *Generator) GenerateKeybinds(config ipc.ConfigKeybinds) string {
 		if !kb.Enabled || kb.Key == "" {
 			return
 		}
-		if ipc.ModifierSelfGroup(kb) != "" {
-			b.WriteString(fmt.Sprintf("# %s+%s skipped: modifier-alone bind, handled by the axctl keymon monitor\n",
-				strings.Join(kb.Modifiers, "+"), kb.Key))
-			return
-		}
 		mods := formatMangoModifiers(kb.Modifiers)
 		dispatcher := mangoMapDispatcher(kb.Dispatcher)
 		arg := kb.Argument
 
 		key := strings.ToUpper(kb.Key)
-		flags := ""
-		if kb.Flags != "" {
-			flags = strings.ToLower(kb.Flags) + ","
+		flags := strings.ToLower(kb.Flags)
+		if ipc.ModifierSelfGroup(kb) != "" && !strings.Contains(flags, "r") {
+			// Mango release binds only fire when no other key was pressed
+			// while the modifier was held, matching modifier-alone semantics.
+			flags += "r"
 		}
 
 		line := fmt.Sprintf("bind%s = %s,%s,%s", flags, mods, key, dispatcher)

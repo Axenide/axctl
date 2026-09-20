@@ -129,9 +129,9 @@ func keybindComboMatches(kb ipc.Keybind, mods, key string) bool {
 }
 
 // keymonBindsFromPayload collects modifier-alone commands (e.g. Super_L
-// with [SUPER]) from a config payload. These binds are skipped in every
-// generated compositor config and are implemented by the keymon evdev
-// monitor instead, which fires them when the modifier is released alone.
+// with [SUPER]) from a config payload. The keymon evdev monitor is only
+// used on niri (see Server.syncKeyMonitor); it fires these commands when
+// the modifier is released alone.
 func keymonBindsFromPayload(payload ipc.ConfigUniversal) map[string]string {
 	binds := map[string]string{}
 	add := func(kb ipc.Keybind) {

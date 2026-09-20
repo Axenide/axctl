@@ -138,7 +138,7 @@ func TestGenerateStartupExecOnce(t *testing.T) {
 	}
 }
 
-func TestGenerateKeybindsSkipsModifierSelf(t *testing.T) {
+func TestGenerateKeybindsModifierSelfUsesReleaseBind(t *testing.T) {
 	g := &Generator{}
 	out := g.GenerateKeybinds(ipc.ConfigKeybinds{
 		Custom: []ipc.Keybind{
@@ -146,13 +146,16 @@ func TestGenerateKeybindsSkipsModifierSelf(t *testing.T) {
 			{Modifiers: []string{"SUPER"}, Key: "Q", Dispatcher: "exec", Argument: "kitty", Enabled: true},
 		},
 	})
-	if strings.Contains(out, "SUPER,SUPER_L") {
-		t.Fatalf("modifier-self bind should be skipped, got: %s", out)
+	if !strings.Contains(out, "bindr = SUPER,SUPER_L,spawn,ambxst run launcher") {
+		t.Fatalf("modifier-self bind should be a release bind, got: %s", out)
 	}
-	if !strings.Contains(out, "SUPER,Q,spawn,kitty") {
+	if strings.Contains(out, "bind = SUPER,SUPER_L") {
+		t.Fatalf("modifier-self bind must not be a plain press bind, got: %s", out)
+	}
+	if !strings.Contains(out, "bind = SUPER,Q,spawn,kitty") {
 		t.Fatalf("ordinary bind should be kept, got: %s", out)
 	}
-	if !strings.Contains(out, "handled by the axctl keymon monitor") {
-		t.Fatalf("expected skip comment, got: %s", out)
+	if strings.Contains(out, "keymon") {
+		t.Fatalf("modifier-self binds are compositor-native now, got: %s", out)
 	}
 }

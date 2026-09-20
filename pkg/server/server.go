@@ -83,11 +83,15 @@ func (s *Server) SeedConfigState(payload ipc.ConfigUniversal) {
 }
 
 // syncKeyMonitor re-registers the modifier-alone binds (e.g. Super_L with
-// SUPER) from the cached config payload. Those binds are skipped in every
-// generated compositor config — compositors cannot express "released alone"
-// without interfering with modifier+key combos — so the keymon evdev
-// monitor implements the behavior for all of them instead.
+// SUPER) from the cached config payload. The keymon evdev monitor is only
+// used on niri, which cannot express "released alone" natively — Hyprland
+// and MangoWC handle those binds themselves through their release-based
+// bind variants, so nothing is registered here there.
 func (s *Server) syncKeyMonitor() {
+	if !s.isNiri() {
+		s.keyMon.SetBinds(map[string]string{})
+		return
+	}
 	payload, ok := s.cfgState.Current()
 	if !ok {
 		s.keyMon.SetBinds(map[string]string{})
@@ -823,16 +827,22 @@ func (s *Server) handleConnection(conn net.Conn) {
 				break
 			}
 			if ipc.ModifierSelfGroupFromParts(strings.Fields(p.Mods), p.Key) != "" {
+				bind := ipc.Keybind{
+					Enabled:    true,
+					Modifiers:  strings.Fields(p.Mods),
+					Key:        p.Key,
+					Dispatcher: "exec",
+					Argument:   p.Command,
+				}
 				if _, aerr := s.cfgState.ApplyKeybinds(ipc.BatchKeybindsPayload{
-					Binds: []ipc.Keybind{{
-						Enabled:    true,
-						Modifiers:  strings.Fields(p.Mods),
-						Key:        p.Key,
-						Dispatcher: "exec",
-						Argument:   p.Command,
-					}},
+					Binds: []ipc.Keybind{bind},
 				}); aerr == nil {
 					s.syncKeyMonitor()
+				}
+				if !s.isNiri() {
+					if b, merr := json.Marshal(ipc.BatchKeybindsPayload{Binds: []ipc.Keybind{bind}}); merr == nil {
+						err = s.compositor.BatchKeybinds(string(b))
+					}
 				}
 				break
 			}
@@ -851,6 +861,9 @@ func (s *Server) handleConnection(conn net.Conn) {
 					Unbinds: []ipc.KeybindTarget{{Modifiers: strings.Fields(p.Mods), Key: p.Key}},
 				}); aerr == nil {
 					s.syncKeyMonitor()
+				}
+				if !s.isNiri() {
+					err = s.compositor.UnbindKey(p.Mods, p.Key)
 				}
 				break
 			}

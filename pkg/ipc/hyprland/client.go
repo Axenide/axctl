@@ -792,12 +792,13 @@ func (h *Hyprland) BatchKeybinds(jsonPayload string) error {
 
 	// Process binds
 	for _, b := range payload.Binds {
-		if ipc.ModifierSelfGroup(b) != "" {
-			continue
-		}
 		mods := strings.Join(b.Modifiers, " ")
 		bindKeyword := "bind"
-		if b.Flags != "" {
+		if ipc.ModifierSelfGroup(b) != "" {
+			// Release binds only fire when no other key was pressed while
+			// the modifier was held, matching modifier-alone semantics.
+			bindKeyword = "bindr"
+		} else if b.Flags != "" {
 			bindKeyword = "bind" + b.Flags
 		}
 		if b.Flags == "m" && b.Argument == "" {
