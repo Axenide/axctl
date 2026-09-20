@@ -66,6 +66,14 @@ func NewMachine() *Machine {
 	}
 }
 
+// Reset clears all state, as if every key was released. Used when a device
+// reader dies so its keys can't stay held forever and block new candidates.
+func (m *Machine) Reset() {
+	m.held = make(map[uint16]bool)
+	m.modifiers = make(map[uint16]bool)
+	m.candidate = false
+}
+
 // Process consumes one evdev event. When a modifier was released alone it
 // returns the fired group (e.g. "SUPER").
 func (m *Machine) Process(eventType uint16, code uint16, value int32) string {

@@ -29,6 +29,12 @@ const (
 	evKeyBit = 1
 	keyA     = 30
 	keyZ     = 48
+	// Mouse button codes (linux/input-event-codes.h). Devices that can
+	// press these are monitored too: a click on any device must cancel a
+	// pending modifier-alone candidate on every other device.
+	btnLeft   = 272
+	btnRight  = 273
+	btnMiddle = 274
 	// EVIOCGBIT(0, 8) and EVIOCGBIT(EV_KEY, 96), per linux/input.h:
 	// _IOC(_IOC_READ, 'E', 0x20 + ev, len) — read direction only.
 	eviocgbitType = 0x80084520
@@ -47,6 +53,11 @@ type Status struct {
 // modifier is pressed and released alone. Device watching starts lazily on
 // the first SetBinds call and readers run for the daemon's lifetime; binds
 // can be swapped at any time.
+//
+// All devices feed one shared Machine: modifiers are released "alone" only
+// when nothing else was pressed on any device in between (keyd's merged
+// stream semantics). Keyboard, mouse and touchpad events can otherwise
+// never cancel each other's candidates.
 type Monitor struct {
 	mu      sync.Mutex
 	binds   map[string]string
@@ -54,6 +65,9 @@ type Monitor struct {
 	warned  bool
 	devices map[string]bool
 	errors  map[string]string
+
+	machineMu sync.Mutex
+	machine   *Machine
 }
 
 func NewMonitor() *Monitor {
@@ -61,6 +75,7 @@ func NewMonitor() *Monitor {
 		binds:   map[string]string{},
 		devices: map[string]bool{},
 		errors:  map[string]string{},
+		machine: NewMachine(),
 	}
 }
 
@@ -129,9 +144,29 @@ func (m *Monitor) currentBinds() map[string]string {
 	return out
 }
 
-// openDevices opens every keyboard-like evdev device and starts a reader
-// goroutine per device. It returns whether at least one device was opened,
-// the opened paths, and per-device errors for introspection.
+// handleEvent feeds one evdev event into the shared machine and returns
+// the fired modifier group, if any. Serializes machine access across
+// device readers; callers must dispatch the returned group themselves
+// (without holding machineMu).
+func (m *Monitor) handleEvent(eventType uint16, code uint16, value int32) string {
+	m.machineMu.Lock()
+	defer m.machineMu.Unlock()
+	return m.machine.Process(eventType, code, value)
+}
+
+// resetMachine clears the shared machine, e.g. when a reader dies with
+// keys still held.
+func (m *Monitor) resetMachine() {
+	m.machineMu.Lock()
+	defer m.machineMu.Unlock()
+	m.machine.Reset()
+}
+
+// openDevices opens every input device that can interfere with a
+// modifier-alone bind — keyboards (letters or modifiers) and pointer
+// devices with buttons (mice, touchpads) — and starts a reader goroutine
+// per device. It returns whether at least one device was opened, the
+// opened paths, and per-device errors for introspection.
 func (m *Monitor) openDevices() (bool, []string, map[string]string) {
 	errs := map[string]string{}
 	matches, err := filepath.Glob("/dev/input/event*")
@@ -149,7 +184,7 @@ func (m *Monitor) openDevices() (bool, []string, map[string]string) {
 		}
 		if !isKeyboard(uintptr(fd)) {
 			unix.Close(fd)
-			errs[path] = "not a keyboard (no EV_KEY letters/modifiers)"
+			errs[path] = "not monitored (no EV_KEY letters, modifiers, or mouse buttons)"
 			continue
 		}
 		devices = append(devices, path)
@@ -160,7 +195,7 @@ func (m *Monitor) openDevices() (bool, []string, map[string]string) {
 }
 
 // isKeyboard reports whether the fd has EV_KEY capability and at least one
-// letter key or a tracked modifier.
+// letter key, a tracked modifier, or a mouse button.
 func isKeyboard(fd uintptr) bool {
 	var typeBits [8]byte
 	if err := ioctlBit(fd, eviocgbitType, typeBits[:]); err != nil {
@@ -188,6 +223,11 @@ func isKeyboard(fd uintptr) bool {
 			return true
 		}
 	}
+	for _, code := range []uint16{btnLeft, btnRight, btnMiddle} {
+		if keyBits[code/8]&(1<<(code%8)) != 0 {
+			return true
+		}
+	}
 	return false
 }
 
@@ -199,10 +239,10 @@ func ioctlBit(fd uintptr, req uint, buf []byte) error {
 }
 
 // readLoop consumes evdev events from one device until the fd errors out.
-// On failure it marks the device gone in the monitor state.
+// Events feed the monitor's shared machine; on failure the machine is
+// reset so keys the device had held can't block future candidates.
 func (m *Monitor) readLoop(path string, fd int) {
 	defer unix.Close(fd)
-	machine := NewMachine()
 	buf := make([]byte, inputEventSize*64)
 	for {
 		n, err := unix.Read(fd, buf)
@@ -210,6 +250,7 @@ func (m *Monitor) readLoop(path string, fd int) {
 			if err == syscall.EINTR {
 				continue
 			}
+			m.resetMachine()
 			m.mu.Lock()
 			delete(m.devices, path)
 			m.errors[path] = fmt.Sprintf("read: %v", err)
@@ -219,7 +260,7 @@ func (m *Monitor) readLoop(path string, fd int) {
 		}
 		for off := 0; off+inputEventSize <= n; off += inputEventSize {
 			ev := *(*inputEvent)(unsafe.Pointer(&buf[off]))
-			if group := machine.Process(ev.Type, ev.Code, ev.Value); group != "" {
+			if group := m.handleEvent(ev.Type, ev.Code, ev.Value); group != "" {
 				m.dispatch(group)
 			}
 		}

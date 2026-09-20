@@ -11,7 +11,6 @@ func repeat(m *Machine, code uint16) string  { return m.Process(evKey, code, 2) 
 const (
 	keyTestT = 20
 	keyTestA = 30
-	btnLeft  = 0x110
 )
 
 func TestSuperAloneFires(t *testing.T) {
