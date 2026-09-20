@@ -792,6 +792,9 @@ func (h *Hyprland) BatchKeybinds(jsonPayload string) error {
 
 	// Process binds
 	for _, b := range payload.Binds {
+		if ipc.ModifierSelfGroup(b) != "" {
+			continue
+		}
 		mods := strings.Join(b.Modifiers, " ")
 		bindKeyword := "bind"
 		if b.Flags != "" {

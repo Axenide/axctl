@@ -188,3 +188,22 @@ func TestLuaAppearanceWorkspaceStyleEmptyFallsBack(t *testing.T) {
 		t.Fatalf("empty WorkspaceStyle should fall back to default, got:\n%s", out)
 	}
 }
+
+func TestLuaKeybindsSkipModifierSelf(t *testing.T) {
+	gen := &LuaGenerator{}
+	out := gen.GenerateKeybindsLua(ipc.ConfigKeybinds{
+		Custom: []ipc.Keybind{
+			{Modifiers: []string{"SUPER"}, Key: "Super_L", Dispatcher: "exec", Argument: "ambxst run launcher", Enabled: true},
+			{Modifiers: []string{"SUPER"}, Key: "Q", Dispatcher: "exec", Argument: "kitty", Enabled: true},
+		},
+	})
+	if strings.Contains(out, `hl.bind("SUPER + Super_L"`) {
+		t.Fatalf("modifier-self bind should be skipped, got: %s", out)
+	}
+	if !strings.Contains(out, `hl.bind("SUPER + Q", hl.dsp.exec_cmd("kitty"))`) {
+		t.Fatalf("ordinary bind should be kept, got: %s", out)
+	}
+	if !strings.Contains(out, "handled by the axctl keymon monitor") {
+		t.Fatalf("expected skip comment, got: %s", out)
+	}
+}

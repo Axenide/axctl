@@ -28,3 +28,22 @@ func TestGenerateLayerRulesKnownProps(t *testing.T) {
 		t.Fatalf("expected layerrule with blur, got: %s", out)
 	}
 }
+
+func TestGenerateKeybindsSkipsModifierSelf(t *testing.T) {
+	g := &Generator{}
+	out := g.GenerateKeybinds(ipc.ConfigKeybinds{
+		Custom: []ipc.Keybind{
+			{Modifiers: []string{"SUPER"}, Key: "Super_L", Dispatcher: "exec", Argument: "ambxst run launcher", Enabled: true},
+			{Modifiers: []string{"SUPER"}, Key: "Q", Dispatcher: "exec", Argument: "kitty", Enabled: true},
+		},
+	})
+	if strings.Contains(out, "bind = SUPER, Super_L") {
+		t.Fatalf("modifier-self bind should be skipped, got: %s", out)
+	}
+	if !strings.Contains(out, "bind = SUPER, Q, exec, kitty") {
+		t.Fatalf("ordinary bind should be kept, got: %s", out)
+	}
+	if !strings.Contains(out, "handled by the axctl keymon monitor") {
+		t.Fatalf("expected skip comment, got: %s", out)
+	}
+}

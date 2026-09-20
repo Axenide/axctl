@@ -32,6 +32,42 @@ if [[ "$os" != "Linux" ]]; then
 	exit 1
 fi
 
+ensure_input_group() {
+	local target
+	if [[ $EUID -eq 0 ]]; then
+		target="${SUDO_USER:-}"
+	else
+		target="$USER"
+	fi
+	if [[ -z "$target" || "$target" == "root" ]]; then
+		return 0
+	fi
+	if id -nG "$target" 2>/dev/null | tr ' ' '\n' | grep -qwx input; then
+		return 0
+	fi
+	local sudo=""
+	if [[ $EUID -ne 0 ]]; then
+		if ! command -v sudo >/dev/null 2>&1; then
+			echo "Warning: cannot add $target to the 'input' group (sudo unavailable)."
+			echo "Modifier-alone binds (e.g. Super alone) need it — see the README."
+			return 0
+		fi
+		sudo="sudo"
+	fi
+	if ! getent group input >/dev/null 2>&1; then
+		$sudo groupadd --system input
+	fi
+	if $sudo usermod -aG input "$target" 2>/dev/null; then
+		echo "Added $target to the 'input' group (needed for modifier-alone binds)."
+		echo "Log out and back in for the change to take effect."
+	else
+		echo "Warning: could not add $target to the 'input' group."
+		echo "Modifier-alone binds (e.g. Super alone) need it — see the README."
+	fi
+}
+
+ensure_input_group
+
 case "$arch" in
 x86_64)
 	asset="axctl_linux_amd64"

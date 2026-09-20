@@ -317,3 +317,21 @@ func runFakeHyprlandSocketWith(t *testing.T, versions []string, responses map[st
 		return append([]string(nil), commands...)
 	}
 }
+
+func TestBatchKeybindsSkipsModifierSelf(t *testing.T) {
+	commands := runFakeHyprlandSocket(t, []string{`{"version":"0.54.2"}`})
+	h := &Hyprland{signature: "test"}
+
+	payload := `{"binds":[` +
+		`{"modifiers":["SUPER"],"key":"Super_L","dispatcher":"exec","argument":"ambxst run launcher","enabled":true},` +
+		`{"modifiers":["SUPER"],"key":"Q","dispatcher":"exec","argument":"kitty","enabled":true}],` +
+		`"unbinds":[{"modifiers":["SUPER"],"key":"Z"}]}`
+	if err := h.BatchKeybinds(payload); err != nil {
+		t.Fatalf("BatchKeybinds() error = %v", err)
+	}
+
+	want := []string{"[[BATCH]]keyword unbind SUPER,Z;keyword bind SUPER,Q,exec,kitty"}
+	if got := commands(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("commands = %#v, want %#v", got, want)
+	}
+}

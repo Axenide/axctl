@@ -157,6 +157,11 @@ func (g *LuaGenerator) GenerateKeybindsLua(config ipc.ConfigKeybinds) string {
 		if !kb.Enabled || kb.Key == "" {
 			return
 		}
+		if ipc.ModifierSelfGroup(kb) != "" {
+			b.WriteString(fmt.Sprintf("-- %s+%s skipped: modifier-alone bind, handled by the axctl keymon monitor\n",
+				strings.Join(kb.Modifiers, " + "), kb.Key))
+			return
+		}
 		mods := strings.Join(kb.Modifiers, " + ")
 		key := kb.Key
 		dispatcher := kb.Dispatcher

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strings"
 	"sync"
 
 	"axctl/pkg/ipc"
@@ -82,9 +83,10 @@ func (s *Server) SeedConfigState(payload ipc.ConfigUniversal) {
 }
 
 // syncKeyMonitor re-registers the modifier-alone binds (e.g. Super_L with
-// SUPER) from the cached config payload. Those binds are skipped in
-// generated niri configs — niri fires binds on press only — so the keymon
-// evdev monitor implements the "press the modifier alone" behavior instead.
+// SUPER) from the cached config payload. Those binds are skipped in every
+// generated compositor config — compositors cannot express "released alone"
+// without interfering with modifier+key combos — so the keymon evdev
+// monitor implements the behavior for all of them instead.
 func (s *Server) syncKeyMonitor() {
 	payload, ok := s.cfgState.Current()
 	if !ok {
@@ -97,6 +99,18 @@ func (s *Server) syncKeyMonitor() {
 func (s *Server) isNiri() bool {
 	_, ok := s.compositor.(*niri.Niri)
 	return ok
+}
+
+// mergeKeybindsPayload applies a batch keybinds payload to the cached
+// config state without touching the compositor, so partial updates keep
+// the state keymon syncs from in step with runtime changes.
+func (s *Server) mergeKeybindsPayload(jsonPayload string) error {
+	var payload ipc.BatchKeybindsPayload
+	if err := json.Unmarshal([]byte(jsonPayload), &payload); err != nil {
+		return err
+	}
+	_, err := s.cfgState.ApplyKeybinds(payload)
+	return err
 }
 
 // applyNiriConfig mutates the cached config state through mutate and
@@ -781,6 +795,9 @@ func (s *Server) handleConnection(conn net.Conn) {
 				})
 			} else {
 				err = s.compositor.BatchKeybinds(p.Payload)
+				if serr := s.mergeKeybindsPayload(p.Payload); serr == nil {
+					s.syncKeyMonitor()
+				}
 			}
 		case "Config.RawBatch":
 			var p struct {
@@ -805,6 +822,20 @@ func (s *Server) handleConnection(conn net.Conn) {
 				resp.Error = fmt.Sprintf("invalid params: %v", err)
 				break
 			}
+			if ipc.ModifierSelfGroupFromParts(strings.Fields(p.Mods), p.Key) != "" {
+				if _, aerr := s.cfgState.ApplyKeybinds(ipc.BatchKeybindsPayload{
+					Binds: []ipc.Keybind{{
+						Enabled:    true,
+						Modifiers:  strings.Fields(p.Mods),
+						Key:        p.Key,
+						Dispatcher: "exec",
+						Argument:   p.Command,
+					}},
+				}); aerr == nil {
+					s.syncKeyMonitor()
+				}
+				break
+			}
 			err = s.compositor.BindKey(p.Mods, p.Key, p.Command)
 		case "Config.UnbindKey":
 			var p struct {
@@ -813,6 +844,14 @@ func (s *Server) handleConnection(conn net.Conn) {
 			}
 			if err := json.Unmarshal(req.Params, &p); err != nil {
 				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
+			if ipc.ModifierSelfGroupFromParts(strings.Fields(p.Mods), p.Key) != "" {
+				if _, aerr := s.cfgState.ApplyKeybinds(ipc.BatchKeybindsPayload{
+					Unbinds: []ipc.KeybindTarget{{Modifiers: strings.Fields(p.Mods), Key: p.Key}},
+				}); aerr == nil {
+					s.syncKeyMonitor()
+				}
 				break
 			}
 			err = s.compositor.UnbindKey(p.Mods, p.Key)

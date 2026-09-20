@@ -137,3 +137,22 @@ func TestGenerateStartupExecOnce(t *testing.T) {
 		t.Fatalf("expected exec, got: %s", out)
 	}
 }
+
+func TestGenerateKeybindsSkipsModifierSelf(t *testing.T) {
+	g := &Generator{}
+	out := g.GenerateKeybinds(ipc.ConfigKeybinds{
+		Custom: []ipc.Keybind{
+			{Modifiers: []string{"SUPER"}, Key: "Super_L", Dispatcher: "exec", Argument: "ambxst run launcher", Enabled: true},
+			{Modifiers: []string{"SUPER"}, Key: "Q", Dispatcher: "exec", Argument: "kitty", Enabled: true},
+		},
+	})
+	if strings.Contains(out, "SUPER,SUPER_L") {
+		t.Fatalf("modifier-self bind should be skipped, got: %s", out)
+	}
+	if !strings.Contains(out, "SUPER,Q,spawn,kitty") {
+		t.Fatalf("ordinary bind should be kept, got: %s", out)
+	}
+	if !strings.Contains(out, "handled by the axctl keymon monitor") {
+		t.Fatalf("expected skip comment, got: %s", out)
+	}
+}

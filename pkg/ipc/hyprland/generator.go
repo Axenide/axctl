@@ -210,6 +210,11 @@ func (g *Generator) GenerateKeybinds(config ipc.ConfigKeybinds) string {
 		if !kb.Enabled || kb.Key == "" {
 			return
 		}
+		if ipc.ModifierSelfGroup(kb) != "" {
+			out.WriteString(fmt.Sprintf("# %s+%s skipped: modifier-alone bind, handled by the axctl keymon monitor\n",
+				strings.Join(kb.Modifiers, "+"), kb.Key))
+			return
+		}
 		mod := formatModifiers(kb.Modifiers)
 		dispatcher := kb.Dispatcher
 		if dispatcher == "" {

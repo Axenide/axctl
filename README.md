@@ -35,7 +35,9 @@ curl -L get.axeni.de/axctl | sh
 ```
 
 On NixOS, the installer uses `nix profile add github:Axenide/axctl` instead of
-writing to `/usr/local/bin`.
+writing to `/usr/local/bin`. On other distros it also adds your user to the
+`input` group (needed for modifier-alone binds — see
+[Modifier-alone binds](#modifier-alone-binds)).
 
 ### Build from source
 
@@ -70,9 +72,9 @@ nix run
 ./axctl subscribe
 ```
 
-> **Niri users:** for Super-alone binds (e.g. Super opens the launcher),
-> add yourself to the `input` group first — see
-> [Modifier-alone binds](#modifier-alone-binds-niri).
+> **Modifier-alone binds** (e.g. Super alone opens the launcher) need the
+> `input` group. The installer adds it automatically; see
+> [Modifier-alone binds](#modifier-alone-binds).
 
 ## Usage guide
 
@@ -238,30 +240,35 @@ The daemon listens on:
 
 `/tmp/axctl-$UID.sock`
 
-## Modifier-alone binds (niri)
+## Modifier-alone binds
 
-Niri fires keybinds on key press only, so a bind on the modifier key itself
-(e.g. `Mod+Super_L` for a Super-alone app launcher) would trigger on every
-Super press and interfere with Super+key combos. Instead, axctl detects
-modifier-alone presses by observing `/dev/input` events (read-only; no
-grab, no uinput) and runs the bound command when the modifier is released
-without any other key press in between.
+A bind on the modifier key itself (e.g. `Super_L` with modifiers `[SUPER]`
+for a Super-alone app launcher) cannot be expressed by compositors without
+interfering with modifier+key combos. axctl therefore skips such binds in
+every generated compositor config (niri, Hyprland, MangoWC) and detects
+modifier-alone presses itself by observing `/dev/input` events (read-only;
+no grab, no uinput), running the bound command when the modifier is
+released without any other key press in between.
 
 Requirements:
 
 - **The daemon user must be in the `input` group** to read
-  `/dev/input/event*`:
+  `/dev/input/event*`. The installer adds the group automatically; for
+  manual or NixOS installs:
 
   ```sh
   sudo usermod -aG input "$USER"
   ```
 
-  Then log out and back in (the change does not apply to running
-  sessions). Verify with: `id | tr ',' '\n' | grep -w input`.
+  On NixOS, add `input` to `users.users.<name>.extraGroups` instead. Then
+  log out and back in (the change does not apply to running sessions).
+  Verify with: `id | tr ',' '\n' | grep -w input`.
 - Declare the bind normally in the config (key `Super_L` with modifiers
-  `[SUPER]`); it is skipped in the generated niri config and handled by the
-  monitor instead. Without the group, the daemon logs a warning and
+  `[SUPER]`); it is skipped in the generated compositor config and handled
+  by the monitor instead. Without the group, the daemon logs a warning and
   modifier-alone binds stay disabled.
+- Keyboards connected after the daemon starts are not monitored; restart
+  the daemon to pick them up.
 - Check the live state with `axctl system keymon-status`.
 
 ## Troubleshooting
@@ -274,7 +281,7 @@ Requirements:
     set (see Environment and sockets).
 - `Error connecting to daemon`
   - Start the daemon with `axctl daemon` and verify the socket exists.
-- Super-alone binds do nothing on niri
+- Super-alone binds do nothing
   - The user must be in the `input` group (log back in after adding it).
     Check `axctl system keymon-status`: it lists the registered binds, the
     opened `/dev/input` devices, and any per-device errors.

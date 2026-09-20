@@ -128,55 +128,14 @@ func keybindComboMatches(kb ipc.Keybind, mods, key string) bool {
 	return kb.Key == key && strings.Join(kb.Modifiers, " ") == mods
 }
 
-// modifierSelfGroup reports whether a keybind is a "modifier key alone"
-// bind: the trigger key is a modifier key and its only modifier is that
-// same modifier (e.g. key Super_L with modifiers [SUPER]). The returned
-// string is the keymon modifier group, or "" when the bind is not of that
-// shape.
-func modifierSelfGroup(kb ipc.Keybind) string {
-	if !kb.Enabled || kb.Dispatcher != "exec" && kb.Dispatcher != "spawn" && kb.Dispatcher != "" {
-		return ""
-	}
-	if len(kb.Modifiers) != 1 {
-		return ""
-	}
-	group := ""
-	switch kb.Key {
-	case "Super_L", "Super_R":
-		group = "SUPER"
-	case "Alt_L", "Alt_R":
-		group = "ALT"
-	case "Control_L", "Control_R":
-		group = "CTRL"
-	case "Shift_L", "Shift_R":
-		group = "SHIFT"
-	default:
-		return ""
-	}
-	var groupMod string
-	switch group {
-	case "SUPER":
-		groupMod = "super"
-	case "ALT":
-		groupMod = "alt"
-	case "CTRL":
-		groupMod = "ctrl"
-	case "SHIFT":
-		groupMod = "shift"
-	}
-	if !strings.EqualFold(kb.Modifiers[0], groupMod) {
-		return ""
-	}
-	return group
-}
-
-// keymonBindsFromPayload collects modifier-alone commands from a config
-// payload. These binds are skipped in generated niri configs (niri fires
-// binds on press only) and are handled by the keymon evdev monitor instead.
+// keymonBindsFromPayload collects modifier-alone commands (e.g. Super_L
+// with [SUPER]) from a config payload. These binds are skipped in every
+// generated compositor config and are implemented by the keymon evdev
+// monitor instead, which fires them when the modifier is released alone.
 func keymonBindsFromPayload(payload ipc.ConfigUniversal) map[string]string {
 	binds := map[string]string{}
 	add := func(kb ipc.Keybind) {
-		if group := modifierSelfGroup(kb); group != "" {
+		if group := ipc.ModifierSelfGroup(kb); group != "" {
 			binds[group] = kb.Argument
 		}
 	}
