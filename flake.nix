@@ -19,11 +19,10 @@
           pkgs = import nixpkgs { inherit system; };
         in
         {
-          default = pkgs.buildGoModule {
+          default = pkgs.buildGoLatestModule {
             pname = "axctl";
             version = "0.0.21";
             src = self;
-            go = pkgs.go;
             subPackages = [ "." ];
             ldflags = [
               "-X"
@@ -47,7 +46,7 @@
         {
           default = pkgs.mkShell {
             packages = [
-              pkgs.go
+              pkgs.go_latest
               pkgs.gopls
             ];
           };
