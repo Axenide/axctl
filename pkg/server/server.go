@@ -340,6 +340,8 @@ func (s *Server) watchEvents() {
 				id = idStr
 			} else if idInt, ok := e.Payload["id"].(int); ok {
 				id = fmt.Sprintf("%d", idInt)
+			} else if addr, err := s.compositor.ActiveWindow(); err == nil {
+				id = addr
 			}
 			if id != "" {
 				if fs, ok := e.Payload["fullscreen"].(bool); ok {
