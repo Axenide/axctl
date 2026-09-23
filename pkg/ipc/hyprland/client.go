@@ -37,6 +37,14 @@ func (h *Hyprland) getSocketPath(socketName string) string {
 	return fmt.Sprintf("%s/hypr/%s/%s", runtimeDir, h.signature, socketName)
 }
 
+var dispatchErrPrefixes = []string{
+	"error:",
+	"unknown request",
+	"Bad ",
+	"Invalid dispatcher",
+	"Parse error",
+}
+
 func (h *Hyprland) dispatch(cmd string) (string, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -57,8 +65,10 @@ func (h *Hyprland) dispatch(cmd string) (string, error) {
 	}
 	resp := string(response)
 	trimmed := strings.TrimSpace(resp)
-	if strings.HasPrefix(trimmed, "error:") || trimmed == "unknown request" {
-		return resp, fmt.Errorf("hyprland rejected request: %s", trimmed)
+	for _, prefix := range dispatchErrPrefixes {
+		if strings.HasPrefix(trimmed, prefix) {
+			return resp, fmt.Errorf("hyprland rejected request: %s", trimmed)
+		}
 	}
 	return resp, nil
 }
@@ -72,29 +82,39 @@ func (h *Hyprland) supportsLuaDispatchers() bool {
 	}
 	h.versionMu.Unlock()
 
-	resp, err := h.dispatch("j/version")
+	// Use hyprctl binary instead of IPC socket to query version,
+	// since the socket doesn't support the version command directly.
+	out, err := exec.Command("hyprctl", "version").Output()
 	if err != nil {
 		return false
 	}
 
-	version, err := parseHyprlandVersion(resp)
+	version, err := parseHyprlandVersion(string(out))
 	if err != nil {
 		return false
 	}
 
 	useLuaDispatch := isHyprlandVersionAtLeast(version, 0, 55)
 	h.versionMu.Lock()
-	h.useLuaDispatch = useLuaDispatch
 	h.versionKnown = true
+	h.useLuaDispatch = useLuaDispatch
 	h.versionMu.Unlock()
 	return useLuaDispatch
 }
 
 func (h *Hyprland) dispatchVersioned(legacy, lua string) (string, error) {
 	if h.supportsLuaDispatchers() {
-		return h.dispatch("dispatch " + lua)
+		resp, err := h.dispatch("[[BATCH]]dispatch " + lua)
+		if err == nil {
+			return resp, nil
+		}
+		// Lua dispatcher failed (e.g. "Invalid dispatcher" on mainline),
+		// fall back to legacy dispatcher.
+		h.versionMu.Lock()
+		h.useLuaDispatch = false
+		h.versionMu.Unlock()
 	}
-	return h.dispatch("dispatch " + legacy)
+	return h.dispatch("[[BATCH]]dispatch " + legacy)
 }
 
 func parseHyprlandVersion(resp string) (string, error) {
