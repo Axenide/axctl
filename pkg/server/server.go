@@ -333,28 +333,11 @@ func (s *Server) watchEvents() {
 			s.initCache()
 			s.broadcastEvent("Event.ConfigReloaded", nil)
 		case ipc.EventFullscreenChanged:
-			var id string
-			if addr, ok := e.Payload["address"].(string); ok {
-				id = addr
-			} else if idStr, ok := e.Payload["id"].(string); ok {
-				id = idStr
-			} else if idInt, ok := e.Payload["id"].(int); ok {
-				id = fmt.Sprintf("%d", idInt)
-			}
-			if id != "" {
-				if fs, ok := e.Payload["fullscreen"].(bool); ok {
-					s.cache.UpdateWindowState(id, fs)
-				} else if fsStr, ok := e.Payload["fullscreen"].(string); ok {
-					s.cache.UpdateWindowState(id, fsStr == "true" || fsStr == "1")
-				} else if fsInt, ok := e.Payload["fullscreen"].(int); ok {
-					s.cache.UpdateWindowState(id, fsInt == 1)
-				}
-			} else {
-				// No window id in the event (e.g. active window could not be
-				// resolved) — refresh the whole cache so subscribers do not
-				// keep serving a stale fullscreen state.
-				s.initCache()
-			}
+			// Fullscreen changes are not limited to the focused window
+			// (clients can request fullscreen on any monitor), so a
+			// targeted cache patch is unreliable. Refresh the whole cache
+			// so subscribers immediately see the real state.
+			s.initCache()
 			s.broadcastEvent("Event.FullscreenChanged", e.Payload)
 		case ipc.EventFocusedMonitorChanged:
 			s.initCache()
