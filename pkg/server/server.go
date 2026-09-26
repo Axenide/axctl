@@ -349,6 +349,11 @@ func (s *Server) watchEvents() {
 				} else if fsInt, ok := e.Payload["fullscreen"].(int); ok {
 					s.cache.UpdateWindowState(id, fsInt == 1)
 				}
+			} else {
+				// No window id in the event (e.g. active window could not be
+				// resolved) — refresh the whole cache so subscribers do not
+				// keep serving a stale fullscreen state.
+				s.initCache()
 			}
 			s.broadcastEvent("Event.FullscreenChanged", e.Payload)
 		case ipc.EventFocusedMonitorChanged:

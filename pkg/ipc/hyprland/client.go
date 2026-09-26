@@ -968,7 +968,15 @@ func (h *Hyprland) Subscribe() (<-chan ipc.Event, error) {
 				}
 			case "fullscreen":
 				event.Type = ipc.EventFullscreenChanged
-				event.Payload["fullscreen"] = parts[1] == "1"
+				// Hyprland reports 0/1/2 (2 = maximize); the window dump
+				// maps any non-zero mode to fullscreen, so match that.
+				event.Payload["fullscreen"] = parts[1] != "0"
+				// The event carries no window address. Resolve the active
+				// window so the daemon can patch the cached state at once
+				// instead of waiting for the next full refresh.
+				if addr, err := h.ActiveWindow(); err == nil && addr != "" {
+					event.Payload["address"] = addr
+				}
 			case "monitoradded":
 				event.Type = ipc.EventMonitorChanged
 				event.Payload["monitor"] = parts[1]
