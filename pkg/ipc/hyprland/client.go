@@ -501,8 +501,13 @@ func (h *Hyprland) ListMonitors() ([]ipc.Monitor, error) {
 		Y               int     `json:"y"`
 		Transform       int     `json:"transform"`
 		ActiveWorkspace struct {
+			ID   int    `json:"id"`
 			Name string `json:"name"`
 		} `json:"activeWorkspace"`
+		SpecialWorkspace struct {
+			ID   int    `json:"id"`
+			Name string `json:"name"`
+		} `json:"specialWorkspace"`
 	}
 
 	if err := json.Unmarshal([]byte(resp), &monitors); err != nil {
@@ -511,6 +516,13 @@ func (h *Hyprland) ListMonitors() ([]ipc.Monitor, error) {
 
 	res := make([]ipc.Monitor, len(monitors))
 	for i, m := range monitors {
+		// The special workspace overlays the regular one (activeWorkspace
+		// keeps pointing at the workspace underneath), so the workspace the
+		// user actually sees is the special one while it is open.
+		visibleWS := m.ActiveWorkspace.ID
+		if m.SpecialWorkspace.Name != "" && m.SpecialWorkspace.ID != 0 {
+			visibleWS = m.SpecialWorkspace.ID
+		}
 		res[i] = ipc.Monitor{
 			ID:          fmt.Sprintf("%d", m.ID),
 			Name:        m.Name,
@@ -521,10 +533,11 @@ func (h *Hyprland) ListMonitors() ([]ipc.Monitor, error) {
 			Scale:       m.Scale,
 			IsFocused:   m.Focused,
 			Metadata: map[string]interface{}{
-				"active_workspace": m.ActiveWorkspace.Name,
-				"x":                m.X,
-				"y":                m.Y,
-				"transform":        m.Transform,
+				"active_workspace":  fmt.Sprintf("%d", m.ActiveWorkspace.ID),
+				"visible_workspace": fmt.Sprintf("%d", visibleWS),
+				"x":                 m.X,
+				"y":                 m.Y,
+				"transform":         m.Transform,
 			},
 		}
 	}
@@ -966,6 +979,12 @@ func (h *Hyprland) Subscribe() (<-chan ipc.Event, error) {
 					event.Payload["address"] = "0x" + data[0]
 					event.Payload["floating"] = data[1] == "1"
 				}
+			case "activespecial":
+				// Special workspaces are not regular workspace switches
+				// (no `workspace` event fires); route them through the
+				// workspace event so the daemon refreshes its cache.
+				event.Type = ipc.EventWorkspaceChanged
+				event.Payload["name"] = parts[1]
 			case "fullscreen":
 				event.Type = ipc.EventFullscreenChanged
 				// Hyprland reports 0/1/2 (2 = maximize); the window dump
