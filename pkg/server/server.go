@@ -252,8 +252,12 @@ func (s *Server) watchEvents() {
 	for e := range events {
 		switch e.Type {
 		case ipc.EventWindowCreated:
+			// The event carries the workspace NAME and no monitor info,
+			// which does not match the ID-based window dump (special and
+			// named workspaces would never match). Replace the appended
+			// entry with a fresh dump instead of trusting it.
+			s.initCache()
 			if e.Window != nil {
-				s.cache.AddWindow(*e.Window)
 				s.broadcastEvent("Event.WindowCreated", e.Window)
 			}
 		case ipc.EventWindowClosed:
@@ -311,21 +315,11 @@ func (s *Server) watchEvents() {
 				s.broadcastEvent("Event.WorkspaceChanged", e.Payload)
 			}
 		case ipc.EventWindowMoved:
-			var id string
-			if addr, ok := e.Payload["address"].(string); ok {
-				id = addr
-			} else if idStr, ok := e.Payload["id"].(string); ok {
-				id = idStr
-			} else if idInt, ok := e.Payload["id"].(int); ok {
-				id = fmt.Sprintf("%d", idInt)
-			}
-			if id != "" {
-				if ws, ok := e.Payload["workspace"].(string); ok {
-					monitor, _ := e.Payload["monitor"].(string)
-					s.cache.UpdateWindowWorkspace(id, ws, monitor)
-					s.broadcastEvent("Event.WindowMoved", map[string]string{"ID": id, "WorkspaceID": ws})
-				}
-			}
+			// Same as window created: the event's workspace value is a
+			// name, not the dump's numeric ID, so patching a single entry
+			// can desync the cache. Refresh instead.
+			s.initCache()
+			s.broadcastEvent("Event.WindowMoved", e.Payload)
 		case ipc.EventMonitorChanged:
 			s.initCache()
 			s.broadcastEvent("Event.MonitorChanged", e.Payload)
