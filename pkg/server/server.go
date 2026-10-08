@@ -306,6 +306,21 @@ func (s *Server) watchEvents() {
 					s.cache.UpdateWindowTitle(id, title)
 				}
 			}
+			// Unfocused windows open as title-changed events; if the
+			// window is not tracked yet (e.g. it opened on a workspace
+			// that just emptied), add it instead of dropping it.
+			if e.Window != nil && e.Window.ID != "" {
+				found := false
+				for _, w := range s.cache.GetWindows() {
+					if w.ID == e.Window.ID {
+						found = true
+						break
+					}
+				}
+				if !found {
+					s.cache.AddWindow(*e.Window)
+				}
+			}
 			s.broadcastEvent("Event.WindowTitleChanged", e.Payload)
 		case ipc.EventWorkspaceChanged:
 			s.initCache()
@@ -1291,7 +1306,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 				break
 			}
 			result = map[string]float64{"brightness": v}
-case "Brightness.Set":
+		case "Brightness.Set":
 			var p struct {
 				Monitor string  `json:"monitor"`
 				Value   float64 `json:"value"`

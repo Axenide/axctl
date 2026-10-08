@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"axctl/pkg/ipc"
@@ -22,6 +23,11 @@ type Niri struct {
 	fsSizes     map[uint64][2]int
 	fsOutputs   map[string][2]int
 	fsOutputsAt time.Time
+
+	wsOutputs   map[string]string
+	wsOutputsAt time.Time
+
+	mapsRefreshing atomic.Bool
 }
 
 const outputSizeCacheTTL = 5 * time.Second
@@ -200,6 +206,10 @@ func (n *Niri) ListWindows() ([]ipc.Window, error) {
 				wsOutputMap[fmt.Sprintf("%d", ws.ID)] = *ws.Output
 			}
 		}
+		n.fsMu.Lock()
+		n.wsOutputs = wsOutputMap
+		n.wsOutputsAt = time.Now()
+		n.fsMu.Unlock()
 	}
 	sizes := n.outputLogicalSizes()
 
@@ -480,7 +490,7 @@ func (n *Niri) forgetWindowSize(id uint64) {
 // output. Only transitions emit events so routine resizes and scrolling do
 // not trigger cache refreshes.
 func (n *Niri) detectFullscreenTransition(id uint64, size [2]int) bool {
-	outputs := n.cachedOutputSizes()
+	outputs := n.eventOutputSizes()
 	n.fsMu.Lock()
 	defer n.fsMu.Unlock()
 	prev, known := n.fsSizes[id]
@@ -509,16 +519,106 @@ func (n *Niri) cachedOutputSizes() map[string][2]int {
 		return outputs
 	}
 	sizes := n.outputLogicalSizes()
-	n.fsMu.Lock()
-	if sizes != nil {
-		n.fsOutputs = sizes
-		n.fsOutputsAt = time.Now()
-	}
-	n.fsMu.Unlock()
+	n.storeOutputSizes(sizes)
 	if sizes == nil {
 		return outputs
 	}
 	return sizes
+}
+
+func (n *Niri) storeOutputSizes(sizes map[string][2]int) {
+	if sizes == nil {
+		return
+	}
+	n.fsMu.Lock()
+	n.fsOutputs = sizes
+	n.fsOutputsAt = time.Now()
+	n.fsMu.Unlock()
+}
+
+// eventOutputSizes is the non-blocking variant for event handlers: it only
+// reads the cache (kicking off a background refresh when stale) so the
+// event stream goroutine never waits on a socket round-trip.
+func (n *Niri) eventOutputSizes() map[string][2]int {
+	n.fsMu.Lock()
+	fresh := n.fsOutputs != nil && time.Since(n.fsOutputsAt) < outputSizeCacheTTL
+	outputs := n.fsOutputs
+	n.fsMu.Unlock()
+	if !fresh {
+		n.refreshStateMapsAsync()
+	}
+	return outputs
+}
+
+// eventWorkspaceOutputMap is the non-blocking workspace->output variant of
+// workspaceOutputMap for use inside event handlers.
+func (n *Niri) eventWorkspaceOutputMap() map[string]string {
+	n.fsMu.Lock()
+	fresh := n.wsOutputs != nil && time.Since(n.wsOutputsAt) < outputSizeCacheTTL
+	outputs := n.wsOutputs
+	n.fsMu.Unlock()
+	if !fresh {
+		n.refreshStateMapsAsync()
+	}
+	return outputs
+}
+
+// refreshStateMapsAsync refreshes the workspace->output map and the output
+// logical sizes in the background, deduplicated with a flag so event
+// bursts cannot pile up goroutines.
+func (n *Niri) refreshStateMapsAsync() {
+	if !n.mapsRefreshing.CompareAndSwap(false, true) {
+		return
+	}
+	go func() {
+		defer n.mapsRefreshing.Store(false)
+		workspaces, err := n.rawWorkspaces()
+		sizes := n.outputLogicalSizes()
+		n.fsMu.Lock()
+		if err == nil {
+			m := make(map[string]string, len(workspaces))
+			for _, ws := range workspaces {
+				if ws.Output != nil {
+					m[fmt.Sprintf("%d", ws.ID)] = *ws.Output
+				}
+			}
+			n.wsOutputs = m
+			n.wsOutputsAt = time.Now()
+		}
+		if sizes != nil {
+			n.fsOutputs = sizes
+			n.fsOutputsAt = time.Now()
+		}
+		n.fsMu.Unlock()
+	}()
+}
+
+// workspaceOutputMap maps workspace id -> output name, TTL-cached so event
+// handlers can enrich windows with monitor metadata without a request per
+// event. Stale on failure; refreshed on the next successful call.
+func (n *Niri) workspaceOutputMap() map[string]string {
+	n.fsMu.Lock()
+	fresh := n.wsOutputs != nil && time.Since(n.wsOutputsAt) < outputSizeCacheTTL
+	outputs := n.wsOutputs
+	n.fsMu.Unlock()
+	if fresh {
+		return outputs
+	}
+	workspaces, err := n.rawWorkspaces()
+	if err != nil {
+		return outputs
+	}
+	m := make(map[string]string, len(workspaces))
+	for _, ws := range workspaces {
+		if ws.Output != nil {
+			m[fmt.Sprintf("%d", ws.ID)] = *ws.Output
+		}
+	}
+	n.fsMu.Lock()
+	n.wsOutputs = m
+	n.wsOutputsAt = time.Now()
+	n.fsMu.Unlock()
+	return m
 }
 
 // outputLogicalSizes returns output name -> [width, height] in logical
@@ -1061,14 +1161,37 @@ func (n *Niri) handleEvent(name string, data json.RawMessage, event *ipc.Event) 
 		if d.Window.AppID != nil {
 			appID = *d.Window.AppID
 		}
+		wsID := ""
+		if d.Window.WorkspaceID != nil {
+			wsID = fmt.Sprintf("%d", *d.Window.WorkspaceID)
+		}
+		// The event window carries the full state; enrich it so the
+		// server can add it to the cache with the same shape a dump
+		// would have. Without the workspace id the QML side filters
+		// the window out until the next full refresh.
+		wsOutput := n.eventWorkspaceOutputMap()
+		metadata := map[string]interface{}{
+			"monitor_id": wsOutput[wsID],
+			"is_urgent":  d.Window.IsUrgent,
+			"pid":        d.Window.PID,
+		}
+		if d.Window.Layout != nil && d.Window.Layout.WindowSize != nil {
+			metadata["width"] = d.Window.Layout.WindowSize[0]
+			metadata["height"] = d.Window.Layout.WindowSize[1]
+		}
 		event.Window = &ipc.Window{
-			ID:         fmt.Sprintf("%d", d.Window.ID),
-			Title:      title,
-			AppID:      appID,
-			IsFocused:  d.Window.IsFocused,
-			IsFloating: d.Window.IsFloating,
+			ID:           fmt.Sprintf("%d", d.Window.ID),
+			Title:        title,
+			AppID:        appID,
+			WorkspaceID:  wsID,
+			IsFocused:    d.Window.IsFocused,
+			IsFloating:   d.Window.IsFloating,
+			IsFullscreen: niriWindowIsFullscreen(d.Window, wsOutput, n.eventOutputSizes()),
+			IsHidden:     false,
+			Metadata:     metadata,
 		}
 		if d.Window.IsFocused {
+			event.Payload["address"] = event.Window.ID
 			event.Type = ipc.EventWindowFocused
 		} else {
 			event.Type = ipc.EventWindowTitleChanged
@@ -1090,6 +1213,9 @@ func (n *Niri) handleEvent(name string, data json.RawMessage, event *ipc.Event) 
 		}
 		_ = json.Unmarshal(data, &d)
 		if d.ID != nil {
+			// The server marks cache focus via the "address" payload;
+			// niri only provides the numeric id.
+			event.Payload["address"] = fmt.Sprintf("%d", *d.ID)
 			event.Payload["id"] = fmt.Sprintf("%d", *d.ID)
 		} else {
 			event.Payload["id"] = nil

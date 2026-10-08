@@ -659,6 +659,77 @@ func TestMoveWindowPixelPayload(t *testing.T) {
 	jsonEq(t, f.requestsSnapshot()[0], `{"Action":{"MoveFloatingWindow":{"id":15,"x":{"SetFixed":100},"y":{"SetFixed":50}}}}`)
 }
 
+func TestWindowOpenedOrChangedEnrichment(t *testing.T) {
+	c := &Niri{socketPath: "unused", fsSizes: make(map[uint64][2]int)}
+	c.wsOutputs = map[string]string{"23": "DP-1"}
+	c.wsOutputsAt = time.Now()
+	c.fsOutputs = map[string][2]int{"DP-1": {1000, 800}}
+	c.fsOutputsAt = time.Now()
+
+	windowEvent := func(id int, focused bool, ws int, size [2]int) ipc.Event {
+		payload, err := json.Marshal(map[string]interface{}{
+			"window": map[string]interface{}{
+				"id":           float64(id),
+				"title":        "t",
+				"app_id":       "app",
+				"is_focused":   focused,
+				"workspace_id": float64(ws),
+				"layout":       map[string]interface{}{"window_size": size},
+			},
+		})
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		var ev ipc.Event
+		ev.Payload = make(map[string]interface{})
+		c.handleEvent("WindowOpenedOrChanged", payload, &ev)
+		return ev
+	}
+
+	ev := windowEvent(9, true, 23, [2]int{1000, 800})
+	if ev.Type != ipc.EventWindowFocused {
+		t.Fatalf("focused open type = %v, want EventWindowFocused", ev.Type)
+	}
+	w := ev.Window
+	if w == nil || w.ID != "9" || w.WorkspaceID != "23" {
+		t.Fatalf("window = %+v, want id=9 workspace=23", w)
+	}
+	if w.Metadata["monitor_id"] != "DP-1" {
+		t.Fatalf("monitor_id = %v, want DP-1", w.Metadata["monitor_id"])
+	}
+	if !w.IsFullscreen {
+		t.Fatal("window matching output size must be flagged fullscreen")
+	}
+	if ev.Payload["address"] != "9" {
+		t.Fatalf("payload address = %v, want 9", ev.Payload["address"])
+	}
+
+	ev = windowEvent(10, false, 23, [2]int{800, 600})
+	if ev.Type != ipc.EventWindowTitleChanged {
+		t.Fatalf("unfocused open type = %v, want EventWindowTitleChanged", ev.Type)
+	}
+	if ev.Window == nil || ev.Window.WorkspaceID != "23" || ev.Window.IsFullscreen {
+		t.Fatalf("unfocused window = %+v", ev.Window)
+	}
+}
+
+func TestWindowFocusChangedCarriesAddress(t *testing.T) {
+	c := &Niri{socketPath: "unused", fsSizes: make(map[uint64][2]int)}
+	payload, err := json.Marshal(map[string]interface{}{"id": 5})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var ev ipc.Event
+	ev.Payload = make(map[string]interface{})
+	c.handleEvent("WindowFocusChanged", payload, &ev)
+	if ev.Type != ipc.EventWindowFocused {
+		t.Fatalf("type = %v, want EventWindowFocused", ev.Type)
+	}
+	if ev.Payload["address"] != "5" || ev.Payload["id"] != "5" {
+		t.Fatalf("payload = %v, want address/id 5", ev.Payload)
+	}
+}
+
 func TestSwitchWorkspaceByID(t *testing.T) {
 	f := newFakeNiri(t, func(req json.RawMessage) (any, error) { return nil, nil })
 	c := f.Client()
