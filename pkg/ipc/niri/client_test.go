@@ -499,15 +499,12 @@ func TestToggleFloatingPayload(t *testing.T) {
 	jsonEq(t, f.requestsSnapshot()[0], `{"Action":{"ToggleWindowFloating":{"id":9}}}`)
 }
 
-func TestSetFullscreenUnsupported(t *testing.T) {
+func TestSetMaximizedUnsupported(t *testing.T) {
 	f := newFakeNiri(t, func(req json.RawMessage) (any, error) {
 		t.Fatalf("server should not receive request: %s", string(req))
 		return nil, nil
 	})
 	c := f.Client()
-	if err := c.SetFullscreen("1", true); err != ipc.ErrNotSupported {
-		t.Fatalf("SetFullscreen error = %v, want ErrNotSupported", err)
-	}
 	if err := c.SetMaximized("1", true); err != ipc.ErrNotSupported {
 		t.Fatalf("SetMaximized error = %v, want ErrNotSupported", err)
 	}
@@ -517,6 +514,122 @@ func TestSetFullscreenUnsupported(t *testing.T) {
 	if len(f.requestsSnapshot()) != 0 {
 		t.Fatalf("no requests should reach server, got %d", len(f.requestsSnapshot()))
 	}
+}
+
+func fullscreenStateHandler(windowSize [2]int) fakeHandler {
+	return func(req json.RawMessage) (any, error) {
+		var v interface{}
+		if err := json.Unmarshal(req, &v); err != nil {
+			return nil, err
+		}
+		if s, ok := v.(string); ok {
+			switch s {
+			case "Workspaces":
+				return map[string]interface{}{
+					"Workspaces": []map[string]interface{}{
+						{"id": float64(2), "idx": float64(1), "output": "DP-1", "is_active": true, "is_focused": true, "is_urgent": false},
+					},
+				}, nil
+			case "Outputs":
+				return map[string]interface{}{
+					"Outputs": map[string]interface{}{
+						"DP-1": map[string]interface{}{
+							"name": "DP-1",
+							"logical": map[string]interface{}{
+								"x": float64(0), "y": float64(0),
+								"width": float64(1000), "height": float64(800),
+								"scale": float64(1), "transform": "Normal",
+							},
+						},
+					},
+				}, nil
+			case "FocusedWindow":
+				return map[string]interface{}{
+					"FocusedWindow": map[string]interface{}{
+						"id":           float64(7),
+						"workspace_id": float64(2),
+						"layout":       map[string]interface{}{"window_size": windowSize},
+					},
+				}, nil
+			case "Windows":
+				return map[string]interface{}{
+					"Windows": []map[string]interface{}{
+						{
+							"id":           float64(7),
+							"title":        "Demo",
+							"app_id":       "demo.app",
+							"workspace_id": float64(2),
+							"is_focused":   true,
+							"is_floating":  false,
+							"is_urgent":    false,
+							"layout":       map[string]interface{}{"window_size": windowSize},
+						},
+					},
+				}, nil
+			}
+			return nil, fmt.Errorf("unexpected request: %s", string(req))
+		}
+		if hasAction(v, "FullscreenWindow") {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("unexpected request: %s", string(req))
+	}
+}
+
+func hasAction(v interface{}, name string) bool {
+	m, ok := v.(map[string]interface{})
+	if !ok {
+		return false
+	}
+	action, ok := m["Action"].(map[string]interface{})
+	if !ok {
+		return false
+	}
+	_, ok = action[name]
+	return ok
+}
+
+func TestSetFullscreenTogglesWhenStateDiffers(t *testing.T) {
+	f := newFakeNiri(t, fullscreenStateHandler([2]int{800, 600}))
+	c := f.Client()
+	if err := c.SetFullscreen("7", true); err != nil {
+		t.Fatalf("SetFullscreen error = %v", err)
+	}
+	reqs := f.requestsSnapshot()
+	jsonEq(t, reqs[len(reqs)-1], `{"Action":{"FullscreenWindow":{"id":7}}}`)
+}
+
+func TestSetFullscreenNoopWhenStateMatches(t *testing.T) {
+	f := newFakeNiri(t, fullscreenStateHandler([2]int{1000, 800}))
+	c := f.Client()
+	if err := c.SetFullscreen("7", true); err != nil {
+		t.Fatalf("SetFullscreen error = %v", err)
+	}
+	for _, req := range f.requestsSnapshot() {
+		if hasAction(parseRequest(t, req), "FullscreenWindow") {
+			t.Fatalf("unexpected action: %s", string(req))
+		}
+	}
+}
+
+func TestSetFullscreenUnfullscreensWhenStateMatches(t *testing.T) {
+	f := newFakeNiri(t, fullscreenStateHandler([2]int{1000, 800}))
+	c := f.Client()
+	if err := c.SetFullscreen("7", false); err != nil {
+		t.Fatalf("SetFullscreen error = %v", err)
+	}
+	reqs := f.requestsSnapshot()
+	jsonEq(t, reqs[len(reqs)-1], `{"Action":{"FullscreenWindow":{"id":7}}}`)
+}
+
+func TestSetFullscreenUsesFocusedWindow(t *testing.T) {
+	f := newFakeNiri(t, fullscreenStateHandler([2]int{800, 600}))
+	c := f.Client()
+	if err := c.SetFullscreen("", true); err != nil {
+		t.Fatalf("SetFullscreen error = %v", err)
+	}
+	reqs := f.requestsSnapshot()
+	jsonEq(t, reqs[len(reqs)-1], `{"Action":{"FullscreenWindow":{"id":7}}}`)
 }
 
 func TestMoveToMonitorPayload(t *testing.T) {

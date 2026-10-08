@@ -179,27 +179,23 @@ func (n *Niri) workspaceReference(workspaceID string) (map[string]interface{}, e
 }
 
 func (n *Niri) ListWindows() ([]ipc.Window, error) {
-	workspaces, _ := n.ListWorkspaces()
+	windows := make([]ipc.Window, 0)
+	niriWindows, err := n.rawWindows()
+	if err != nil {
+		return nil, err
+	}
+
 	wsOutputMap := make(map[string]string)
-	for _, ws := range workspaces {
-		wsOutputMap[ws.ID] = ws.MonitorID
+	if workspaces, werr := n.rawWorkspaces(); werr == nil {
+		for _, ws := range workspaces {
+			if ws.Output != nil {
+				wsOutputMap[fmt.Sprintf("%d", ws.ID)] = *ws.Output
+			}
+		}
 	}
+	sizes := n.outputLogicalSizes()
 
-	raw, err := n.requestRaw("Windows")
-	if err != nil {
-		return nil, err
-	}
-	variant, err := unwrapVariant(raw, "Windows")
-	if err != nil {
-		return nil, err
-	}
-	var niriWindows []niriWindow
-	if err := json.Unmarshal(variant, &niriWindows); err != nil {
-		return nil, err
-	}
-
-	windows := make([]ipc.Window, len(niriWindows))
-	for i, w := range niriWindows {
+	for _, w := range niriWindows {
 		title := ""
 		if w.Title != nil {
 			title = *w.Title
@@ -229,17 +225,17 @@ func (n *Niri) ListWindows() ([]ipc.Window, error) {
 			metadata["height"] = w.Layout.WindowSize[1]
 		}
 
-		windows[i] = ipc.Window{
+		windows = append(windows, ipc.Window{
 			ID:           fmt.Sprintf("%d", w.ID),
 			Title:        title,
 			AppID:        appID,
 			WorkspaceID:  wsID,
 			IsFocused:    w.IsFocused,
 			IsFloating:   w.IsFloating,
-			IsFullscreen: false,
+			IsFullscreen: niriWindowIsFullscreen(w, wsOutputMap, sizes),
 			IsHidden:     false,
 			Metadata:     metadata,
-		}
+		})
 	}
 	return windows, nil
 }
@@ -376,8 +372,125 @@ func (n *Niri) ToggleFloating(id string) error {
 	return n.requestAction(map[string]interface{}{"ToggleWindowFloating": args})
 }
 
+// SetFullscreen applies the requested fullscreen state. niri's IPC only
+// exposes FullscreenWindow as a toggle, so the current state is inferred by
+// comparing the window size with the logical size of its output: a
+// fullscreen tile always covers the entire output.
 func (n *Niri) SetFullscreen(id string, state bool) error {
-	return ipc.ErrNotSupported
+	targetID := id
+	if targetID == "" {
+		var err error
+		targetID, err = n.ActiveWindow()
+		if err != nil {
+			return err
+		}
+		if targetID == "" {
+			return nil
+		}
+	}
+
+	current, err := n.windowIsFullscreen(targetID)
+	if err != nil {
+		return err
+	}
+	if current == state {
+		return nil
+	}
+
+	v, err := parseUint64ID(targetID)
+	if err != nil {
+		return err
+	}
+	return n.requestAction(map[string]interface{}{
+		"FullscreenWindow": map[string]interface{}{"id": v},
+	})
+}
+
+func (n *Niri) windowIsFullscreen(id string) (bool, error) {
+	target, err := parseUint64ID(id)
+	if err != nil {
+		return false, err
+	}
+	windows, err := n.rawWindows()
+	if err != nil {
+		return false, err
+	}
+	for _, w := range windows {
+		if w.ID != target {
+			continue
+		}
+		wsOutput := make(map[string]string)
+		if workspaces, werr := n.rawWorkspaces(); werr == nil {
+			for _, ws := range workspaces {
+				if ws.Output != nil {
+					wsOutput[fmt.Sprintf("%d", ws.ID)] = *ws.Output
+				}
+			}
+		}
+		return niriWindowIsFullscreen(w, wsOutput, n.outputLogicalSizes()), nil
+	}
+	return false, fmt.Errorf("window %s not found", id)
+}
+
+func niriWindowIsFullscreen(w niriWindow, wsOutput map[string]string, sizes map[string][2]int) bool {
+	if w.Layout == nil || w.Layout.WindowSize == nil {
+		return false
+	}
+	wsID := ""
+	if w.WorkspaceID != nil {
+		wsID = fmt.Sprintf("%d", *w.WorkspaceID)
+	}
+	output, ok := wsOutput[wsID]
+	if !ok {
+		return false
+	}
+	size, ok := sizes[output]
+	if !ok {
+		return false
+	}
+	return (*w.Layout.WindowSize)[0] == size[0] && (*w.Layout.WindowSize)[1] == size[1]
+}
+
+// outputLogicalSizes returns output name -> [width, height] in logical
+// pixels. Failures degrade gracefully to an empty map (no window is then
+// considered fullscreen).
+func (n *Niri) outputLogicalSizes() map[string][2]int {
+	raw, err := n.requestRaw("Outputs")
+	if err != nil {
+		return nil
+	}
+	variant, err := unwrapVariant(raw, "Outputs")
+	if err != nil {
+		return nil
+	}
+	var outputs map[string]niriOutput
+	if err := json.Unmarshal(variant, &outputs); err != nil {
+		return nil
+	}
+	sizes := make(map[string][2]int, len(outputs))
+	for name, o := range outputs {
+		if o.Logical == nil {
+			continue
+		}
+		sizes[name] = [2]int{int(o.Logical.Width), int(o.Logical.Height)}
+	}
+	return sizes
+}
+
+func (n *Niri) rawWindows() ([]niriWindow, error) {
+	raw, err := n.requestRaw("Windows")
+	if err != nil {
+		return nil, err
+	}
+	variant, err := unwrapVariant(raw, "Windows")
+	if err != nil {
+		return nil, err
+	}
+	var windows []niriWindow
+	if err := json.Unmarshal(variant, &windows); err != nil {
+		return nil, err
+	}
+	return windows, nil
 }
 
 func (n *Niri) SetMaximized(id string, state bool) error {
@@ -400,7 +513,7 @@ func (n *Niri) SetLayoutProperty(id string, key, value string) error {
 	return ipc.ErrNotSupported
 }
 
-func (n *Niri) ListWorkspaces() ([]ipc.Workspace, error) {
+func (n *Niri) rawWorkspaces() ([]niriWorkspace, error) {
 	raw, err := n.requestRaw("Workspaces")
 	if err != nil {
 		return nil, err
@@ -409,8 +522,16 @@ func (n *Niri) ListWorkspaces() ([]ipc.Workspace, error) {
 	if err != nil {
 		return nil, err
 	}
-	var niriWorkspaces []niriWorkspace
-	if err := json.Unmarshal(variant, &niriWorkspaces); err != nil {
+	var workspaces []niriWorkspace
+	if err := json.Unmarshal(variant, &workspaces); err != nil {
+		return nil, err
+	}
+	return workspaces, nil
+}
+
+func (n *Niri) ListWorkspaces() ([]ipc.Workspace, error) {
+	niriWorkspaces, err := n.rawWorkspaces()
+	if err != nil {
 		return nil, err
 	}
 
