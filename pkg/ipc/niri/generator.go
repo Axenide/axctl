@@ -334,6 +334,8 @@ func niriMapDispatcher(d, arg string) (string, bool) {
 			return "expel-window-from-column", true
 		case "consume":
 			return "consume-window-into-column", true
+		case "center":
+			return "center-column", true
 		case "swapcol":
 			if len(fields) > 1 {
 				switch fields[1] {

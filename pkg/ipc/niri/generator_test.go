@@ -328,6 +328,7 @@ func TestGenerateKeybindsCompositorDispatchers(t *testing.T) {
 		"layoutmsg promote":              "expel-window-from-column",
 		"layoutmsg expel":                "expel-window-from-column",
 		"layoutmsg consume":              "consume-window-into-column",
+		"layoutmsg center":               "center-column",
 		"layoutmsg swapcol l":            "swap-window-left",
 		"layoutmsg swapcol r":            "swap-window-right",
 		"layoutmsg movecoltoworkspace 3": "move-column-to-workspace 3",
