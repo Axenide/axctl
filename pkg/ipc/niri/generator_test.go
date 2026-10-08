@@ -313,7 +313,7 @@ func TestGenerateKeybindsCompositorDispatchers(t *testing.T) {
 		"movefocus r":                    "focus-column-right",
 		"movefocus u":                    "focus-window-up",
 		"movefocus d":                    "focus-window-down",
-		"movewindow l":                   "move-column-left",
+		"movewindow l":                   "consume-or-expel-window-left",
 		"movewindow d":                   "move-window-down",
 		"movetoworkspace 5":              "move-window-to-workspace 5",
 		"movetoworkspace e+1":            "move-window-to-workspace-down",
@@ -329,11 +329,11 @@ func TestGenerateKeybindsCompositorDispatchers(t *testing.T) {
 		"layoutmsg expel":                "expel-window-from-column",
 		"layoutmsg consume":              "consume-window-into-column",
 		"layoutmsg center":               "center-column",
-		"layoutmsg swapcol l":            "swap-window-left",
-		"layoutmsg swapcol r":            "swap-window-right",
+		"layoutmsg swapcol l":            "move-column-left",
+		"layoutmsg swapcol r":            "move-column-right",
 		"layoutmsg movecoltoworkspace 3": "move-column-to-workspace 3",
 		"layoutmsg focus u":              "focus-window-up",
-		"layoutmsg movewindowto r":       "move-column-right",
+		"layoutmsg movewindowto r":       "consume-or-expel-window-right",
 	}
 	for input, want := range cases {
 		parts := strings.Fields(input)

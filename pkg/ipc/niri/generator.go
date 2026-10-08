@@ -238,9 +238,12 @@ func niriMapDispatcher(d, arg string) (string, bool) {
 	case "movewindow":
 		switch arg {
 		case "l":
-			return "move-column-left", true
+			// Scrolling semantics: the window joins the adjacent column,
+			// or is expelled into its own column when the column has
+			// multiple windows. Whole-column moves use swapcol instead.
+			return "consume-or-expel-window-left", true
 		case "r":
-			return "move-column-right", true
+			return "consume-or-expel-window-right", true
 		case "u":
 			return "move-window-up", true
 		case "d":
@@ -340,9 +343,9 @@ func niriMapDispatcher(d, arg string) (string, bool) {
 			if len(fields) > 1 {
 				switch fields[1] {
 				case "l":
-					return "swap-window-left", true
+					return "move-column-left", true
 				case "r":
-					return "swap-window-right", true
+					return "move-column-right", true
 				}
 			}
 		case "movecoltoworkspace":
@@ -366,9 +369,9 @@ func niriMapDispatcher(d, arg string) (string, bool) {
 			if len(fields) > 1 {
 				switch fields[1] {
 				case "l":
-					return "move-column-left", true
+					return "consume-or-expel-window-left", true
 				case "r":
-					return "move-column-right", true
+					return "consume-or-expel-window-right", true
 				case "u":
 					return "move-window-up", true
 				case "d":
