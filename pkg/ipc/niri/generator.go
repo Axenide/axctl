@@ -310,11 +310,68 @@ func niriMapDispatcher(d, arg string) (string, bool) {
 			return "", false
 		}
 		switch fields[0] {
-		case "promote", "togglefit":
-			return "maximize-column", true
 		case "colresize":
-			if len(fields) > 1 && isNiriSizeChange(fields[1]) {
+			if len(fields) < 2 {
+				return "", false
+			}
+			// Hyprland scrolling "+conf"/"-conf" cycle the configured
+			// column widths; niri's preset switcher wraps the same way.
+			switch fields[1] {
+			case "+conf":
+				return "switch-preset-column-width", true
+			case "-conf":
+				return "switch-preset-column-width-back", true
+			}
+			if isNiriSizeChange(fields[1]) {
 				return "set-column-width " + kdlQuote(fields[1]), true
+			}
+			// Scrolling deltas are proportions of the usable area
+			// (e.g. "+0.1"); niri expresses the same as percentages.
+			if pct, ok := niriProportionChange(fields[1]); ok {
+				return "set-column-width " + kdlQuote(pct), true
+			}
+		case "promote", "expel":
+			return "expel-window-from-column", true
+		case "consume":
+			return "consume-window-into-column", true
+		case "swapcol":
+			if len(fields) > 1 {
+				switch fields[1] {
+				case "l":
+					return "swap-window-left", true
+				case "r":
+					return "swap-window-right", true
+				}
+			}
+		case "movecoltoworkspace":
+			if len(fields) > 1 {
+				return formatNiriAction("move-column-to-workspace", fields[1]), true
+			}
+		case "focus":
+			if len(fields) > 1 {
+				switch fields[1] {
+				case "l":
+					return "focus-column-left", true
+				case "r":
+					return "focus-column-right", true
+				case "u":
+					return "focus-window-up", true
+				case "d":
+					return "focus-window-down", true
+				}
+			}
+		case "movewindowto":
+			if len(fields) > 1 {
+				switch fields[1] {
+				case "l":
+					return "move-column-left", true
+				case "r":
+					return "move-column-right", true
+				case "u":
+					return "move-window-up", true
+				case "d":
+					return "move-window-down", true
+				}
 			}
 		}
 		return "", false
@@ -361,6 +418,22 @@ func isNumeric(s string) bool {
 		}
 	}
 	return true
+}
+
+// niriProportionChange converts a scrolling colresize delta expressed as a
+// fraction of the usable area (e.g. "+0.1") into niri's percentage size
+// change (e.g. "+10%").
+func niriProportionChange(token string) (string, bool) {
+	body := token
+	sign := ""
+	if len(body) > 0 && (body[0] == '+' || body[0] == '-') {
+		sign, body = body[:1], body[1:]
+	}
+	f, err := strconv.ParseFloat(body, 64)
+	if err != nil {
+		return "", false
+	}
+	return fmt.Sprintf("%s%d%%", sign, int(f*100+0.5)), true
 }
 
 // isNiriSizeChange reports whether a token is a valid niri SizeChange
