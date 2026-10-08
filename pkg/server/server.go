@@ -21,12 +21,32 @@ type Server struct {
 	cache      *ipc.StateCache
 	cfgState   *ConfigState
 	keyMon     *keymon.Monitor
-	clients    map[net.Conn]struct{}
+	clients    map[net.Conn]*eventClient
 	clientsMu  sync.RWMutex
 	idleMgr    *IdleManager
 
 	mu           sync.RWMutex
 	overviewOpen *bool
+}
+
+// eventClient is a subscribed connection with its own serialized outbound
+// queue. A dedicated writer goroutine drains the queue so notifications
+// reach the client in the order they were broadcast; writing directly from
+// ephemeral goroutines let concurrent broadcasts race and deliver stale
+// state dumps after fresh ones (e.g. an inverted overview_open).
+type eventClient struct {
+	conn net.Conn
+	out  chan []byte
+}
+
+const eventClientQueueSize = 256
+
+func (ec *eventClient) writeLoop() {
+	for data := range ec.out {
+		if _, err := ec.conn.Write(data); err != nil {
+			return
+		}
+	}
 }
 
 func New(c ipc.Compositor, path string) *Server {
@@ -41,7 +61,7 @@ func New(c ipc.Compositor, path string) *Server {
 		cache:      ipc.NewStateCache(),
 		cfgState:   NewConfigState(),
 		keyMon:     keymon.NewMonitor(),
-		clients:    make(map[net.Conn]struct{}),
+		clients:    make(map[net.Conn]*eventClient),
 		idleMgr:    idleMgr,
 	}
 	if idleMgr != nil {
@@ -417,7 +437,10 @@ func (s *Server) handleConnection(conn net.Conn) {
 	}
 	defer func() {
 		s.clientsMu.Lock()
-		delete(s.clients, conn)
+		if ec, ok := s.clients[conn]; ok {
+			close(ec.out)
+			delete(s.clients, conn)
+		}
 		s.clientsMu.Unlock()
 	}()
 
@@ -1389,8 +1412,13 @@ func (s *Server) handleConnection(conn net.Conn) {
 
 		case "System.Subscribe":
 			s.clientsMu.Lock()
-			s.clients[conn] = struct{}{}
+			if ec, ok := s.clients[conn]; ok {
+				close(ec.out)
+			}
+			ec := &eventClient{conn: conn, out: make(chan []byte, eventClientQueueSize)}
+			s.clients[conn] = ec
 			s.clientsMu.Unlock()
+			go ec.writeLoop()
 			notif := Notification{
 				JSONRPC: "2.0",
 				Method:  "State.Dump",
@@ -1402,7 +1430,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 			}
 			if data, err := json.Marshal(notif); err == nil {
 				data = append(data, '\n')
-				conn.Write(data)
+				ec.out <- data
 			}
 			result = "subscribed"
 
@@ -1468,10 +1496,11 @@ func (s *Server) broadcastEvent(method string, params interface{}) {
 	}
 	data = append(data, '\n')
 
-	for conn := range s.clients {
-		go func(c net.Conn) {
-			c.Write(data)
-		}(conn)
+	for _, ec := range s.clients {
+		select {
+		case ec.out <- data:
+		default:
+		}
 	}
 }
 
