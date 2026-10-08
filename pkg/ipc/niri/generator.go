@@ -484,6 +484,15 @@ func (g *Generator) GenerateAppearance(config ipc.ConfigAppearance) string {
 		}
 		b.WriteString(fmt.Sprintf("    gaps %d\n", *config.Gaps.Inner))
 	}
+	// Mirror Hyprland scrolling:explicit_column_widths defaults so
+	// switch-preset-column-width cycles reach full width like colresize
+	// +conf does on Hyprland (niri's builtin presets stop at 2/3).
+	b.WriteString("    preset-column-widths {\n")
+	b.WriteString("        proportion 0.33333\n")
+	b.WriteString("        proportion 0.5\n")
+	b.WriteString("        proportion 0.66667\n")
+	b.WriteString("        proportion 1.0\n")
+	b.WriteString("    }\n")
 	if config.Border != nil {
 		if !hasLayout {
 			b.WriteString("layout {\n")
