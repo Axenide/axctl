@@ -668,6 +668,47 @@ func TestSwitchWorkspaceByID(t *testing.T) {
 	jsonEq(t, f.requestsSnapshot()[0], `{"Action":{"FocusWorkspace":{"reference":{"Id":3}}}}`)
 }
 
+func TestFullscreenTransitionDetection(t *testing.T) {
+	c := &Niri{socketPath: "unused", fsSizes: make(map[uint64][2]int)}
+	c.fsOutputs = map[string][2]int{"DP-1": {1000, 800}}
+
+	layoutEvent := func(size [2]int) ipc.Event {
+		payload, err := json.Marshal(map[string]interface{}{
+			"changes": [][]interface{}{
+				{7, map[string]interface{}{"window_size": size}},
+			},
+		})
+		if err != nil {
+			t.Fatalf("marshal payload: %v", err)
+		}
+		var event ipc.Event
+		event.Payload = make(map[string]interface{})
+		c.handleEvent("WindowLayoutsChanged", payload, &event)
+		return event
+	}
+
+	if ev := layoutEvent([2]int{800, 600}); ev.Type == ipc.EventFullscreenChanged {
+		t.Fatalf("first known size must not report a transition: %+v", ev)
+	}
+	if ev := layoutEvent([2]int{800, 601}); ev.Type == ipc.EventFullscreenChanged {
+		t.Fatalf("plain resize must not report a transition: %+v", ev)
+	}
+	if ev := layoutEvent([2]int{1000, 800}); ev.Type != ipc.EventFullscreenChanged {
+		t.Fatalf("entering fullscreen must report EventFullscreenChanged, got %+v", ev)
+	}
+	if ev := layoutEvent([2]int{1000, 800}); ev.Type == ipc.EventFullscreenChanged {
+		t.Fatalf("stable fullscreen size must not report a transition: %+v", ev)
+	}
+	if ev := layoutEvent([2]int{900, 700}); ev.Type != ipc.EventFullscreenChanged {
+		t.Fatalf("leaving fullscreen must report EventFullscreenChanged, got %+v", ev)
+	}
+
+	c.forgetWindowSize(7)
+	if ev := layoutEvent([2]int{1000, 800}); ev.Type == ipc.EventFullscreenChanged {
+		t.Fatalf("unknown window must not report a transition: %+v", ev)
+	}
+}
+
 func TestSwitchWorkspaceByName(t *testing.T) {
 	f := newFakeNiri(t, func(req json.RawMessage) (any, error) { return nil, nil })
 	c := f.Client()

@@ -17,7 +17,14 @@ import (
 type Niri struct {
 	socketPath string
 	mu         sync.Mutex
+
+	fsMu        sync.Mutex
+	fsSizes     map[uint64][2]int
+	fsOutputs   map[string][2]int
+	fsOutputsAt time.Time
 }
+
+const outputSizeCacheTTL = 5 * time.Second
 
 func New() (*Niri, error) {
 	path := os.Getenv("NIRI_SOCKET")
@@ -32,7 +39,7 @@ func New() (*Niri, error) {
 		}
 		path = matches[0]
 	}
-	return &Niri{socketPath: path}, nil
+	return &Niri{socketPath: path, fsSizes: make(map[uint64][2]int)}, nil
 }
 
 func (n *Niri) dial() (net.Conn, error) {
@@ -184,6 +191,7 @@ func (n *Niri) ListWindows() ([]ipc.Window, error) {
 	if err != nil {
 		return nil, err
 	}
+	n.rememberWindowSizes(niriWindows)
 
 	wsOutputMap := make(map[string]string)
 	if workspaces, werr := n.rawWorkspaces(); werr == nil {
@@ -449,6 +457,68 @@ func niriWindowIsFullscreen(w niriWindow, wsOutput map[string]string, sizes map[
 		return false
 	}
 	return (*w.Layout.WindowSize)[0] == size[0] && (*w.Layout.WindowSize)[1] == size[1]
+}
+
+func (n *Niri) rememberWindowSizes(windows []niriWindow) {
+	n.fsMu.Lock()
+	defer n.fsMu.Unlock()
+	for _, w := range windows {
+		if w.Layout != nil && w.Layout.WindowSize != nil {
+			n.fsSizes[w.ID] = *w.Layout.WindowSize
+		}
+	}
+}
+
+func (n *Niri) forgetWindowSize(id uint64) {
+	n.fsMu.Lock()
+	delete(n.fsSizes, id)
+	n.fsMu.Unlock()
+}
+
+// detectFullscreenTransition reports whether a window just entered or left
+// fullscreen, inferred from its layout size crossing the logical size of any
+// output. Only transitions emit events so routine resizes and scrolling do
+// not trigger cache refreshes.
+func (n *Niri) detectFullscreenTransition(id uint64, size [2]int) bool {
+	outputs := n.cachedOutputSizes()
+	n.fsMu.Lock()
+	defer n.fsMu.Unlock()
+	prev, known := n.fsSizes[id]
+	n.fsSizes[id] = size
+	if !known || prev == size || len(outputs) == 0 {
+		return false
+	}
+	return sizeMatchesAnyOutput(prev, outputs) != sizeMatchesAnyOutput(size, outputs)
+}
+
+func sizeMatchesAnyOutput(size [2]int, outputs map[string][2]int) bool {
+	for _, o := range outputs {
+		if size == o {
+			return true
+		}
+	}
+	return false
+}
+
+func (n *Niri) cachedOutputSizes() map[string][2]int {
+	n.fsMu.Lock()
+	fresh := n.fsOutputs != nil && time.Since(n.fsOutputsAt) < outputSizeCacheTTL
+	outputs := n.fsOutputs
+	n.fsMu.Unlock()
+	if fresh {
+		return outputs
+	}
+	sizes := n.outputLogicalSizes()
+	n.fsMu.Lock()
+	if sizes != nil {
+		n.fsOutputs = sizes
+		n.fsOutputsAt = time.Now()
+	}
+	n.fsMu.Unlock()
+	if sizes == nil {
+		return outputs
+	}
+	return sizes
 }
 
 // outputLogicalSizes returns output name -> [width, height] in logical
@@ -974,9 +1044,15 @@ func (n *Niri) handleEvent(name string, data json.RawMessage, event *ipc.Event) 
 		}
 	case "WindowsChanged":
 		event.Type = ipc.EventWorkspaceChanged
+		var d struct {
+			Windows []niriWindow `json:"windows"`
+		}
+		_ = json.Unmarshal(data, &d)
+		n.rememberWindowSizes(d.Windows)
 	case "WindowOpenedOrChanged":
 		var d niriWindowEvent
 		_ = json.Unmarshal(data, &d)
+		n.rememberWindowSizes([]niriWindow{d.Window})
 		title := ""
 		if d.Window.Title != nil {
 			title = *d.Window.Title
@@ -1005,6 +1081,7 @@ func (n *Niri) handleEvent(name string, data json.RawMessage, event *ipc.Event) 
 			ID uint64 `json:"id"`
 		}
 		_ = json.Unmarshal(data, &d)
+		n.forgetWindowSize(d.ID)
 		event.Payload["id"] = fmt.Sprintf("%d", d.ID)
 	case "WindowFocusChanged":
 		event.Type = ipc.EventWindowFocused
@@ -1022,10 +1099,19 @@ func (n *Niri) handleEvent(name string, data json.RawMessage, event *ipc.Event) 
 			Changes [][2]json.RawMessage `json:"changes"`
 		}
 		_ = json.Unmarshal(data, &d)
-		if len(d.Changes) > 0 {
+		for _, change := range d.Changes {
 			var id uint64
-			_ = json.Unmarshal(d.Changes[0][0], &id)
-			event.Payload["id"] = fmt.Sprintf("%d", id)
+			if err := json.Unmarshal(change[0], &id); err != nil {
+				continue
+			}
+			var layout niriWindowLayout
+			if err := json.Unmarshal(change[1], &layout); err != nil || layout.WindowSize == nil {
+				continue
+			}
+			if n.detectFullscreenTransition(id, *layout.WindowSize) {
+				event.Type = ipc.EventFullscreenChanged
+				event.Payload["id"] = fmt.Sprintf("%d", id)
+			}
 		}
 	case "KeyboardLayoutsChanged", "KeyboardLayoutSwitched":
 		event.Type = ipc.EventConfigReloaded
