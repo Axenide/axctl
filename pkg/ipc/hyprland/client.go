@@ -57,7 +57,7 @@ func (h *Hyprland) dispatch(cmd string) (string, error) {
 	}
 	resp := string(response)
 	trimmed := strings.TrimSpace(resp)
-	if strings.HasPrefix(trimmed, "error:") || trimmed == "unknown request" {
+	if strings.HasPrefix(trimmed, "error:") || trimmed == "unknown request" || trimmed == "Invalid dispatcher" {
 		return resp, fmt.Errorf("hyprland rejected request: %s", trimmed)
 	}
 	return resp, nil
@@ -82,7 +82,9 @@ func (h *Hyprland) supportsLuaDispatchers() bool {
 		return false
 	}
 
-	useLuaDispatch := isHyprlandVersionAtLeast(version, 0, 55)
+	// The hl.* Lua dispatchers arrived in Hyprland 0.56; 0.55 answers
+	// "Invalid dispatcher" to them.
+	useLuaDispatch := isHyprlandVersionAtLeast(version, 0, 56)
 	h.versionMu.Lock()
 	h.useLuaDispatch = useLuaDispatch
 	h.versionKnown = true
