@@ -57,7 +57,7 @@ func TestIsHyprlandVersionAtLeast055(t *testing.T) {
 }
 
 func TestDispatchVersionedRetriesAfterVersionParseFailure(t *testing.T) {
-	commands := runFakeHyprlandSocket(t, []string{`{}`, `{"version":"0.55.0"}`})
+	commands := runFakeHyprlandSocket(t, []string{`{}`, `{"version":"0.56.0"}`})
 	h := &Hyprland{signature: "test"}
 
 	if err := h.Execute("kitty"); err != nil {
@@ -130,7 +130,7 @@ func TestHyprlandLuaDispatcherCommands(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			commands := runFakeHyprlandSocket(t, []string{`{"version":"0.55.0"}`})
+			commands := runFakeHyprlandSocket(t, []string{`{"version":"0.56.0"}`})
 			h := &Hyprland{signature: "test"}
 
 			if err := tt.run(h); err != nil {
