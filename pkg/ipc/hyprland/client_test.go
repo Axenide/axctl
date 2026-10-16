@@ -88,7 +88,6 @@ func TestHyprlandLegacyDispatcherCommands(t *testing.T) {
 		{name: "switch workspace", run: func(h *Hyprland) error { return h.SwitchWorkspace("+1") }, want: "dispatch workspace +1"},
 		{name: "toggle special workspace", run: func(h *Hyprland) error { return h.ToggleSpecialWorkspace("") }, want: "dispatch togglespecialworkspace"},
 		{name: "execute", run: func(h *Hyprland) error { return h.Execute("kitty --class demo") }, want: "dispatch exec kitty --class demo"},
-		{name: "fake fullscreen toggles blindly", run: func(h *Hyprland) error { return h.SetFakeFullscreen("", true) }, want: "dispatch fullscreen 2"},
 	}
 
 	for _, tt := range tests {
@@ -127,7 +126,7 @@ func TestHyprlandLuaDispatcherCommands(t *testing.T) {
 		{name: "set maximized uses set action", run: func(h *Hyprland) error { return h.SetMaximized("", true) }, want: `dispatch hl.dsp.window.fullscreen({ mode = "maximized", action = "set" })`},
 		{name: "unset maximized uses unset action", run: func(h *Hyprland) error { return h.SetMaximized("", false) }, want: `dispatch hl.dsp.window.fullscreen({ mode = "maximized", action = "unset" })`},
 		{name: "group nav backwards", run: func(h *Hyprland) error { return h.GroupNav("l") }, want: "dispatch hl.dsp.group.prev()"},
-		{name: "fake fullscreen uses fullscreen_state", run: func(h *Hyprland) error { return h.SetFakeFullscreen("", true) }, want: `dispatch hl.dsp.window.fullscreen_state({ internal = 2, client = 0, action = "toggle" })`},
+		{name: "fake fullscreen uses fullscreen_state", run: func(h *Hyprland) error { return h.SetFakeFullscreen("", true) }, want: `dispatch hl.dsp.window.fullscreen_state({ internal = 0, client = 2, action = "toggle" })`},
 	}
 
 	for _, tt := range tests {
@@ -355,6 +354,20 @@ func TestListWindowsFullscreenModes(t *testing.T) {
 	for _, w := range wins {
 		if w.IsFullscreen != want[w.ID] {
 			t.Fatalf("window %s IsFullscreen = %v, want %v", w.ID, w.IsFullscreen, want[w.ID])
+		}
+	}
+}
+
+func TestSetFakeFullscreenRequiresLua(t *testing.T) {
+	commands := runFakeHyprlandSocket(t, []string{`{"version":"0.54.2"}`})
+	h := &Hyprland{signature: "test"}
+
+	if err := h.SetFakeFullscreen("", true); err != ipc.ErrNotSupported {
+		t.Fatalf("SetFakeFullscreen error = %v, want ErrNotSupported", err)
+	}
+	for _, cmd := range commands() {
+		if cmd != "j/version" {
+			t.Fatalf("unexpected command on legacy hyprland: %s", cmd)
 		}
 	}
 }

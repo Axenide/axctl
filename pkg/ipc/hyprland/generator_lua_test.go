@@ -207,3 +207,20 @@ func TestLuaKeybindsModifierSelfUsesReleaseFlag(t *testing.T) {
 		t.Fatalf("modifier-self binds are compositor-native now, got: %s", out)
 	}
 }
+
+func TestDispatcherToLuaFullscreenModes(t *testing.T) {
+	cases := []struct {
+		arg  string
+		want string
+	}{
+		{arg: "", want: "hl.dsp.window.fullscreen()"},
+		{arg: "0", want: `hl.dsp.window.fullscreen({ action = "unset" })`},
+		{arg: "1", want: `hl.dsp.window.fullscreen({ mode = "maximized", action = "toggle" })`},
+		{arg: "2", want: `hl.dsp.window.fullscreen_state({ internal = 0, client = 2, action = "toggle" })`},
+	}
+	for _, c := range cases {
+		if got := dispatcherToLua("fullscreen", c.arg); got != c.want {
+			t.Fatalf("dispatcherToLua(fullscreen, %q) = %q, want %q", c.arg, got, c.want)
+		}
+	}
+}

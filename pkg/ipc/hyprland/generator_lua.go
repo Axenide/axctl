@@ -275,13 +275,15 @@ func dispatcherToLua(dispatcher, arg string) string {
 		return "hl.dsp.window.float({ action = \"toggle\" })"
 	case "fullscreen":
 		// Mirror the legacy dispatcher semantics: "" and "0" toggle plain
-		// fullscreen, "1" toggles maximize, "2" toggles fullscreen without
-		// the fullscreen flag (fake fullscreen).
+		// fullscreen, "1" toggles maximize. "2" is fake fullscreen:
+		// internal 0 keeps the window at its layout size while client 2
+		// tells the application it is fullscreen (legacy `fullscreen 2`
+		// is the opposite pairing, so there is no legacy equivalent).
 		if arg == "1" {
 			return "hl.dsp.window.fullscreen({ mode = \"maximized\", action = \"toggle\" })"
 		}
 		if arg == "2" {
-			return "hl.dsp.window.fullscreen_state({ internal = 2, client = 0, action = \"toggle\" })"
+			return "hl.dsp.window.fullscreen_state({ internal = 0, client = 2, action = \"toggle\" })"
 		}
 		if arg == "0" {
 			return "hl.dsp.window.fullscreen({ action = \"unset\" })"

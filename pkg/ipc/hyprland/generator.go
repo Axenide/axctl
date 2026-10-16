@@ -217,6 +217,15 @@ func (g *Generator) GenerateKeybinds(config ipc.ConfigKeybinds) string {
 		}
 		arg := kb.Argument
 
+		// Fake fullscreen (fullscreen 2) maps to fullscreen_state with
+		// internal=0/client=2, which only exists as a Lua dispatcher.
+		// Legacy conf files have no equivalent, so skip the bind rather
+		// than emitting the wrong-semantics `fullscreen 2`.
+		if dispatcher == "fullscreen" && strings.TrimSpace(arg) == "2" {
+			out.WriteString(fmt.Sprintf("# skipped: %s (fake fullscreen requires Lua dispatchers / Hyprland >= 0.55)\n", comment))
+			return
+		}
+
 		bindKw := "bind"
 		if strings.HasPrefix(strings.ToLower(kb.Key), "mouse:") {
 			bindKw = "bindm"
