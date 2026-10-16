@@ -337,3 +337,24 @@ func TestBatchKeybindsModifierSelfUsesReleaseBind(t *testing.T) {
 		t.Fatalf("commands = %#v, want %#v", got, want)
 	}
 }
+
+func TestListWindowsFullscreenModes(t *testing.T) {
+	clients := `[` +
+		`{"address":"0x1","title":"real","class":"A","fullscreen":2,"fullscreenClient":2,"at":[0,0],"size":[100,100]},` +
+		`{"address":"0x2","title":"maximized","class":"B","fullscreen":1,"fullscreenClient":1,"at":[0,0],"size":[100,100]},` +
+		`{"address":"0x3","title":"fake","class":"C","fullscreen":2,"fullscreenClient":0,"at":[0,0],"size":[100,100]},` +
+		`{"address":"0x4","title":"plain","class":"D","fullscreen":0,"fullscreenClient":0,"at":[0,0],"size":[100,100]}]`
+	runFakeHyprlandSocketWith(t, []string{`{"version":"0.55.0"}`}, map[string]string{"j/clients": clients})
+	h := &Hyprland{signature: "test"}
+
+	wins, err := h.ListWindows()
+	if err != nil {
+		t.Fatalf("ListWindows error = %v", err)
+	}
+	want := map[string]bool{"0x1": true, "0x2": false, "0x3": false, "0x4": false}
+	for _, w := range wins {
+		if w.IsFullscreen != want[w.ID] {
+			t.Fatalf("window %s IsFullscreen = %v, want %v", w.ID, w.IsFullscreen, want[w.ID])
+		}
+	}
+}

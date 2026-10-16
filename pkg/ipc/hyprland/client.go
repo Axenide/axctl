@@ -209,16 +209,17 @@ func (h *Hyprland) ListWindows() ([]ipc.Window, error) {
 	}
 
 	var clients []struct {
-		Address    string `json:"address"`
-		Title      string `json:"title"`
-		Class      string `json:"class"`
-		Floating   bool   `json:"floating"`
-		Fullscreen int    `json:"fullscreen"`
-		Pinned     bool   `json:"pinned"`
-		Monitor    int    `json:"monitor"`
-		At         []int  `json:"at"`
-		Size       []int  `json:"size"`
-		Workspace  struct {
+		Address          string `json:"address"`
+		Title            string `json:"title"`
+		Class            string `json:"class"`
+		Floating         bool   `json:"floating"`
+		Fullscreen       int    `json:"fullscreen"`
+		FullscreenClient int    `json:"fullscreenClient"`
+		Pinned           bool   `json:"pinned"`
+		Monitor          int    `json:"monitor"`
+		At               []int  `json:"at"`
+		Size             []int  `json:"size"`
+		Workspace        struct {
 			ID int `json:"id"`
 		} `json:"workspace"`
 	}
@@ -231,13 +232,19 @@ func (h *Hyprland) ListWindows() ([]ipc.Window, error) {
 	windows := make([]ipc.Window, len(clients))
 	for i, c := range clients {
 		windows[i] = ipc.Window{
-			ID:           c.Address,
-			Title:        c.Title,
-			AppID:        c.Class,
-			WorkspaceID:  fmt.Sprintf("%d", c.Workspace.ID),
-			IsFocused:    false, // Will be updated if active
-			IsFloating:   c.Floating,
-			IsFullscreen: c.Fullscreen != 0,
+			ID:          c.Address,
+			Title:       c.Title,
+			AppID:       c.Class,
+			WorkspaceID: fmt.Sprintf("%d", c.Workspace.ID),
+			IsFocused:   false, // Will be updated if active
+			IsFloating:  c.Floating,
+			// Only true fullscreen counts as fullscreen: the internal
+			// `fullscreen` field is 2 for both real and fake fullscreen
+			// ("fullscreen without fullscreen flag"), while `fullscreenClient`
+			// is 2 only when the client was actually told. Maximize (1) and
+			// fake fullscreen (internal 2 / client 0) must not read as
+			// fullscreen — shells use this flag to hide the UI.
+			IsFullscreen: c.Fullscreen == 2 && c.FullscreenClient == 2,
 			IsHidden:     false,
 			Metadata: map[string]interface{}{
 				"monitor_id": fmt.Sprintf("%d", c.Monitor),
@@ -1000,9 +1007,13 @@ func (h *Hyprland) Subscribe() (<-chan ipc.Event, error) {
 				event.Payload["name"] = parts[1]
 			case "fullscreen":
 				event.Type = ipc.EventFullscreenChanged
-				// Hyprland reports 0/1/2 (2 = maximize); the window dump
-				// maps any non-zero mode to fullscreen, so match that.
-				event.Payload["fullscreen"] = parts[1] != "0"
+				// Hyprland emits the internal mode (0 = none, 1 = maximize,
+				// 2 = fullscreen, including fake fullscreen). Match the
+				// window dump mapping: only real fullscreen (2, client 2)
+				// reads as fullscreen, and the event cannot check the
+				// client mode, so treat 2 as fullscreen and let the cache
+				// refresh that follows apply the stricter rule.
+				event.Payload["fullscreen"] = parts[1] == "2"
 				// The event carries no window address. Resolve the active
 				// window so the daemon can patch the cached state at once
 				// instead of waiting for the next full refresh.
