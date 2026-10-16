@@ -13,6 +13,7 @@ type Compositor interface {
 	ToggleFloating(id string) error
 	SetFullscreen(id string, state bool) error
 	SetMaximized(id string, state bool) error
+	SetFakeFullscreen(id string, state bool) error
 	PinWindow(id string, state bool) error
 
 	ToggleGroup(id string) error

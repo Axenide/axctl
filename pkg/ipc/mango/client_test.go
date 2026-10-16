@@ -432,6 +432,26 @@ func TestSetFullscreenInvalidID(t *testing.T) {
 	}
 }
 
+func TestSetFakeFullscreenDispatchesBlindToggle(t *testing.T) {
+	s := newFakeServer(t, func(t *testing.T, parts []string) (string, bool, bool, string) {
+		if len(parts) >= 1 && parts[0] == "dispatch" {
+			return "", true, true, ""
+		}
+		return "", true, false, "unexpected"
+	})
+	m := s.Client(t)
+	if err := m.SetFakeFullscreen("1", true); err != nil {
+		t.Fatal(err)
+	}
+	reqs := s.Requests()
+	for _, r := range reqs {
+		if r == "dispatch togglefakefullscreen client,1" {
+			return
+		}
+	}
+	t.Fatalf("expected togglefakefullscreen dispatch in %v", reqs)
+}
+
 func TestSetMaximizedSkipsWhenSame(t *testing.T) {
 	dispatches := 0
 	s := newFakeServer(t, func(t *testing.T, parts []string) (string, bool, bool, string) {

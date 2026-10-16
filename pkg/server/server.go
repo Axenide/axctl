@@ -550,6 +550,17 @@ func (s *Server) handleConnection(conn net.Conn) {
 			}
 			id, _ := s.resolveID(p.ID)
 			err = s.compositor.SetMaximized(id, p.State)
+		case "Window.FakeFullscreen":
+			var p struct {
+				ID    string `json:"id"`
+				State bool   `json:"state"`
+			}
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
+			id, _ := s.resolveID(p.ID)
+			err = s.compositor.SetFakeFullscreen(id, p.State)
 		case "Window.Pin":
 			var p struct {
 				ID    string `json:"id"`

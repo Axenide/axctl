@@ -663,8 +663,55 @@ func (n *Niri) rawWindows() ([]niriWindow, error) {
 	return windows, nil
 }
 
+// SetMaximized toggles niri's MaximizeWindowToEdges action. niri provides no
+// IPC flag to query the maximized state, so the request is a blind toggle,
+// mirroring how the compositor exposes the action itself.
 func (n *Niri) SetMaximized(id string, state bool) error {
-	return ipc.ErrNotSupported
+	targetID := id
+	if targetID == "" {
+		var err error
+		targetID, err = n.ActiveWindow()
+		if err != nil {
+			return err
+		}
+		if targetID == "" {
+			return nil
+		}
+	}
+
+	v, err := parseUint64ID(targetID)
+	if err != nil {
+		return err
+	}
+	return n.requestAction(map[string]interface{}{
+		"MaximizeWindowToEdges": map[string]interface{}{"id": v},
+	})
+}
+
+// SetFakeFullscreen toggles niri's ToggleWindowedFullscreen action: the
+// client believes it is fullscreen while the window keeps its current size.
+// There is no IPC flag to query the windowed-fullscreen state, so the
+// request is a blind toggle.
+func (n *Niri) SetFakeFullscreen(id string, state bool) error {
+	targetID := id
+	if targetID == "" {
+		var err error
+		targetID, err = n.ActiveWindow()
+		if err != nil {
+			return err
+		}
+		if targetID == "" {
+			return nil
+		}
+	}
+
+	v, err := parseUint64ID(targetID)
+	if err != nil {
+		return err
+	}
+	return n.requestAction(map[string]interface{}{
+		"ToggleWindowedFullscreen": map[string]interface{}{"id": v},
+	})
 }
 
 func (n *Niri) PinWindow(id string, state bool) error {

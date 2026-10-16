@@ -412,3 +412,23 @@ func TestGenerateKeybindsSkipsModifierSelfBind(t *testing.T) {
 		t.Fatalf("expected explanatory skip comment:\n%s", out)
 	}
 }
+
+func TestGenerateKeybindsFullscreenModes(t *testing.T) {
+	g := &Generator{}
+	out := g.GenerateKeybinds(ipc.ConfigKeybinds{
+		Custom: []ipc.Keybind{
+			{Modifiers: []string{"SUPER"}, Key: "F", Dispatcher: "fullscreen", Enabled: true},
+			{Modifiers: []string{"SUPER", "SHIFT"}, Key: "F", Dispatcher: "fullscreen", Argument: "1", Enabled: true},
+			{Modifiers: []string{"SUPER", "CTRL"}, Key: "F", Dispatcher: "fullscreen", Argument: "2", Enabled: true},
+		},
+	})
+	if !strings.Contains(out, "Mod+F {") || !strings.Contains(out, "fullscreen-window") {
+		t.Fatalf("expected fullscreen-window bind, got: %s", out)
+	}
+	if !strings.Contains(out, "Mod+Shift+F {") || !strings.Contains(out, "maximize-window-to-edges") {
+		t.Fatalf("expected maximize-window-to-edges bind, got: %s", out)
+	}
+	if !strings.Contains(out, "Mod+Ctrl+F {") || !strings.Contains(out, "toggle-windowed-fullscreen") {
+		t.Fatalf("expected toggle-windowed-fullscreen bind, got: %s", out)
+	}
+}

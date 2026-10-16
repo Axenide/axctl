@@ -161,6 +161,10 @@ func (c *Compositor) SetMaximized(id string, state bool) error {
 	return nil
 }
 
+func (c *Compositor) SetFakeFullscreen(id string, state bool) error {
+	return nil
+}
+
 func (c *Compositor) PinWindow(id string, state bool) error {
 	return nil
 }

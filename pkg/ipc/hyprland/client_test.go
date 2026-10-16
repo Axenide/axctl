@@ -88,6 +88,7 @@ func TestHyprlandLegacyDispatcherCommands(t *testing.T) {
 		{name: "switch workspace", run: func(h *Hyprland) error { return h.SwitchWorkspace("+1") }, want: "dispatch workspace +1"},
 		{name: "toggle special workspace", run: func(h *Hyprland) error { return h.ToggleSpecialWorkspace("") }, want: "dispatch togglespecialworkspace"},
 		{name: "execute", run: func(h *Hyprland) error { return h.Execute("kitty --class demo") }, want: "dispatch exec kitty --class demo"},
+		{name: "fake fullscreen toggles blindly", run: func(h *Hyprland) error { return h.SetFakeFullscreen("", true) }, want: "dispatch fullscreen 2"},
 	}
 
 	for _, tt := range tests {
@@ -126,6 +127,7 @@ func TestHyprlandLuaDispatcherCommands(t *testing.T) {
 		{name: "set maximized uses set action", run: func(h *Hyprland) error { return h.SetMaximized("", true) }, want: `dispatch hl.dsp.window.fullscreen({ mode = "maximized", action = "set" })`},
 		{name: "unset maximized uses unset action", run: func(h *Hyprland) error { return h.SetMaximized("", false) }, want: `dispatch hl.dsp.window.fullscreen({ mode = "maximized", action = "unset" })`},
 		{name: "group nav backwards", run: func(h *Hyprland) error { return h.GroupNav("l") }, want: "dispatch hl.dsp.group.prev()"},
+		{name: "fake fullscreen uses fullscreen_state", run: func(h *Hyprland) error { return h.SetFakeFullscreen("", true) }, want: `dispatch hl.dsp.window.fullscreen_state({ internal = 2, client = 0, action = "toggle" })`},
 	}
 
 	for _, tt := range tests {

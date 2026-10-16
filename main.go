@@ -97,6 +97,7 @@ func usage() {
 	fmt.Println("    toggle-floating [id]    Toggle floating")
 	fmt.Println("    fullscreen <0|1> [id]   Set fullscreen")
 	fmt.Println("    maximize <0|1> [id]     Set maximized")
+	fmt.Println("    fake-fullscreen <0|1> [id] Toggle fake fullscreen")
 	fmt.Println("    pin <0|1> [id]          Pin window")
 	fmt.Println("    toggle-group [id]       Toggle window group (Hyprland)")
 	fmt.Println("    group-nav <f|b>         Navigate group tabs")
@@ -419,6 +420,13 @@ func handleRPC(category string, args []string) {
 			params["id"] = args[2]
 		}
 	case "Window.Maximize":
+		if len(args) > 1 {
+			params["state"] = args[1] == "1"
+		}
+		if len(args) > 2 {
+			params["id"] = args[2]
+		}
+	case "Window.FakeFullscreen":
 		if len(args) > 1 {
 			params["state"] = args[1] == "1"
 		}

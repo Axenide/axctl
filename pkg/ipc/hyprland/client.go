@@ -367,6 +367,19 @@ func (h *Hyprland) SetMaximized(id string, state bool) error {
 	return err
 }
 
+// SetFakeFullscreen toggles Hyprland's "fullscreen without fullscreen flag"
+// mode: the window fills the monitor but the client is never told it is
+// fullscreen. The state cannot be inferred from the client list (the flag
+// stays 0 in this mode), so the request is a blind toggle, like
+// ToggleFloating.
+func (h *Hyprland) SetFakeFullscreen(id string, state bool) error {
+	_, err := h.dispatchVersioned(
+		"fullscreen 2",
+		fmt.Sprintf("hl.dsp.window.fullscreen_state({ internal = 2, client = 0, action = %q%s })", "toggle", luaTargetField(id)),
+	)
+	return err
+}
+
 func (h *Hyprland) PinWindow(id string, state bool) error {
 	target := hyprTarget(id)
 	_, err := h.dispatchVersioned(

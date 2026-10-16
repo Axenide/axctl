@@ -164,16 +164,19 @@ func niriModifierSelfBind(key string, mods []string) (string, bool) {
 }
 
 var niriDispatchers = map[string]string{
-	"exec":                         "spawn",
-	"spawn":                        "spawn",
-	"close":                        "close-window",
-	"close-window":                 "close-window",
-	"fullscreen":                   "fullscreen-window",
-	"fullscreen-window":            "fullscreen-window",
-	"maximize":                     "maximize-window",
-	"maximize-window":              "maximize-window",
-	"unmaximize":                   "unmaximize-window",
-	"unmaximize-window":            "unmaximize-window",
+	"exec":                       "spawn",
+	"spawn":                      "spawn",
+	"close":                      "close-window",
+	"close-window":               "close-window",
+	"fullscreen":                 "fullscreen-window",
+	"fullscreen-window":          "fullscreen-window",
+	"windowed-fullscreen":        "toggle-windowed-fullscreen",
+	"toggle-windowed-fullscreen": "toggle-windowed-fullscreen",
+	// niri has no separate unmaximize action; MaximizeWindowToEdges toggles.
+	"maximize":                     "maximize-window-to-edges",
+	"maximize-window":              "maximize-window-to-edges",
+	"unmaximize":                   "maximize-window-to-edges",
+	"unmaximize-window":            "maximize-window-to-edges",
 	"toggle-floating":              "toggle-window-floating",
 	"togglefloating":               "toggle-window-floating",
 	"toggle-window-floating":       "toggle-window-floating",
@@ -218,9 +221,13 @@ func niriMapDispatcher(d, arg string) (string, bool) {
 	case "exit":
 		return "quit", true
 	case "fullscreen":
-		// Hyprland: 0 = fullscreen toggle, 1 = maximize toggle.
+		// Hyprland: 0 = fullscreen toggle, 1 = maximize toggle,
+		// 2 = fullscreen without the fullscreen flag (fake fullscreen).
 		if arg == "1" {
-			return "maximize-window", true
+			return "maximize-window-to-edges", true
+		}
+		if arg == "2" {
+			return "toggle-windowed-fullscreen", true
 		}
 		return "fullscreen-window", true
 	case "movefocus":

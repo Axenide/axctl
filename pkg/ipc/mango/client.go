@@ -272,6 +272,24 @@ func (m *Mango) SetMaximized(id string, state bool) error {
 	return conn.Dispatch("togglemaximizescreen " + target)
 }
 
+// SetFakeFullscreen toggles mango's fake-fullscreen mode (the client is
+// told it is fullscreen while the window keeps its size). dwl-ipc exposes
+// no fake-fullscreen state flag, so the request is a blind toggle.
+func (m *Mango) SetFakeFullscreen(id string, state bool) error {
+	if _, err := parseClientID(id); err != nil {
+		return err
+	}
+	target, err := clientTarget(id)
+	if err != nil {
+		return err
+	}
+	conn, err := m.acquire()
+	if err != nil {
+		return err
+	}
+	return conn.Dispatch("togglefakefullscreen " + target)
+}
+
 func (m *Mango) PinWindow(id string, state bool) error {
 	if _, err := parseClientID(id); err != nil {
 		return err

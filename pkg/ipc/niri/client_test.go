@@ -499,15 +499,12 @@ func TestToggleFloatingPayload(t *testing.T) {
 	jsonEq(t, f.requestsSnapshot()[0], `{"Action":{"ToggleWindowFloating":{"id":9}}}`)
 }
 
-func TestSetMaximizedUnsupported(t *testing.T) {
+func TestSetLayoutUnsupported(t *testing.T) {
 	f := newFakeNiri(t, func(req json.RawMessage) (any, error) {
 		t.Fatalf("server should not receive request: %s", string(req))
 		return nil, nil
 	})
 	c := f.Client()
-	if err := c.SetMaximized("1", true); err != ipc.ErrNotSupported {
-		t.Fatalf("SetMaximized error = %v, want ErrNotSupported", err)
-	}
 	if err := c.SetLayout("dwindle"); err != ipc.ErrNotSupported {
 		t.Fatalf("SetLayout error = %v, want ErrNotSupported", err)
 	}
@@ -516,11 +513,42 @@ func TestSetMaximizedUnsupported(t *testing.T) {
 	}
 }
 
+func TestSetMaximizedTogglesToEdges(t *testing.T) {
+	f := newFakeNiri(t, func(req json.RawMessage) (any, error) { return nil, nil })
+	c := f.Client()
+	if err := c.SetMaximized("7", true); err != nil {
+		t.Fatalf("SetMaximized error = %v", err)
+	}
+	jsonEq(t, f.requestsSnapshot()[0], `{"Action":{"MaximizeWindowToEdges":{"id":7}}}`)
+}
+
+func TestSetMaximizedUsesFocusedWindow(t *testing.T) {
+	f := newFakeNiri(t, fullscreenStateHandler([2]int{800, 600}))
+	c := f.Client()
+	if err := c.SetMaximized("", true); err != nil {
+		t.Fatalf("SetMaximized error = %v", err)
+	}
+	reqs := f.requestsSnapshot()
+	jsonEq(t, reqs[len(reqs)-1], `{"Action":{"MaximizeWindowToEdges":{"id":7}}}`)
+}
+
+func TestSetFakeFullscreenTogglesWindowedFullscreen(t *testing.T) {
+	f := newFakeNiri(t, func(req json.RawMessage) (any, error) { return nil, nil })
+	c := f.Client()
+	if err := c.SetFakeFullscreen("7", true); err != nil {
+		t.Fatalf("SetFakeFullscreen error = %v", err)
+	}
+	jsonEq(t, f.requestsSnapshot()[0], `{"Action":{"ToggleWindowedFullscreen":{"id":7}}}`)
+}
+
 func fullscreenStateHandler(windowSize [2]int) fakeHandler {
 	return func(req json.RawMessage) (any, error) {
 		var v interface{}
 		if err := json.Unmarshal(req, &v); err != nil {
 			return nil, err
+		}
+		if _, ok := v.(map[string]interface{}); ok {
+			return nil, nil
 		}
 		if s, ok := v.(string); ok {
 			switch s {
