@@ -371,3 +371,29 @@ func TestSetFakeFullscreenRequiresLua(t *testing.T) {
 		}
 	}
 }
+
+func TestListMonitorsLogicalSize(t *testing.T) {
+	responses := map[string]string{
+		"j/monitors": `[{"id":0,"name":"eDP-2","width":2880,"height":1800,"refreshRate":60.0,"focused":true,"scale":2.0,"x":0,"y":0,"transform":0,"activeWorkspace":{"id":1,"name":"1"},"specialWorkspace":{"id":0,"name":""}},
+			{"id":1,"name":"DP-2","width":1920,"height":1080,"refreshRate":60.0,"focused":false,"scale":1.0,"x":1440,"y":0,"transform":0,"activeWorkspace":{"id":2,"name":"2"},"specialWorkspace":{"id":0,"name":""}}]`,
+	}
+	runFakeHyprlandSocketWith(t, nil, responses)
+	h := &Hyprland{signature: "test"}
+
+	monitors, err := h.ListMonitors()
+	if err != nil {
+		t.Fatalf("ListMonitors() error = %v", err)
+	}
+	if len(monitors) != 2 {
+		t.Fatalf("monitors = %d, want 2", len(monitors))
+	}
+	if monitors[0].Width != 2880 || monitors[0].Height != 1800 {
+		t.Fatalf("physical = %dx%d, want 2880x1800", monitors[0].Width, monitors[0].Height)
+	}
+	if monitors[0].LogicalWidth != 1440 || monitors[0].LogicalHeight != 900 {
+		t.Fatalf("logical = %dx%d, want 1440x900", monitors[0].LogicalWidth, monitors[0].LogicalHeight)
+	}
+	if monitors[1].LogicalWidth != 1920 || monitors[1].LogicalHeight != 1080 {
+		t.Fatalf("scale-1 logical = %dx%d, want 1920x1080", monitors[1].LogicalWidth, monitors[1].LogicalHeight)
+	}
+}

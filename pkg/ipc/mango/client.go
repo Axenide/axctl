@@ -446,13 +446,17 @@ func (m *Mango) ListMonitors() ([]ipc.Monitor, error) {
 		if mm.Scale > 0 {
 			scale = float64(mm.Scale) / 100.0
 		}
+		// MangoWC serializes its monitor layout box, which is already in
+		// logical coordinates.
 		out = append(out, ipc.Monitor{
-			ID:        mm.Name,
-			Name:      mm.Name,
-			Width:     mm.Width,
-			Height:    mm.Height,
-			Scale:     scale,
-			IsFocused: mm.Focused != 0,
+			ID:            mm.Name,
+			Name:          mm.Name,
+			Width:         mm.Width,
+			Height:        mm.Height,
+			LogicalWidth:  mm.Width,
+			LogicalHeight: mm.Height,
+			Scale:         scale,
+			IsFocused:     mm.Focused != 0,
 			Metadata: map[string]interface{}{
 				"x":      mm.X,
 				"y":      mm.Y,

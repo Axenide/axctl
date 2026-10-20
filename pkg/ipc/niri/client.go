@@ -921,6 +921,8 @@ func (n *Niri) ListMonitors() ([]ipc.Monitor, error) {
 		if o.Logical != nil {
 			m.Width = int(o.Logical.Width)
 			m.Height = int(o.Logical.Height)
+			m.LogicalWidth = m.Width
+			m.LogicalHeight = m.Height
 			m.Scale = o.Logical.Scale
 			m.Metadata["x"] = o.Logical.X
 			m.Metadata["y"] = o.Logical.Y
@@ -934,6 +936,11 @@ func (n *Niri) ListMonitors() ([]ipc.Monitor, error) {
 			}
 			if m.Height == 0 {
 				m.Height = int(mode.Height)
+			}
+			// Mode dimensions are physical; without a Logical payload the
+			// best we can do is derive from scale (0 → identity).
+			if m.LogicalWidth == 0 {
+				m.LogicalWidth, m.LogicalHeight = ipc.LogicalSizeFromPhysical(m.Width, m.Height, m.Scale)
 			}
 		}
 		res = append(res, m)

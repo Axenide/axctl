@@ -1309,3 +1309,27 @@ func TestSetConfigUnsupported(t *testing.T) {
 }
 
 func writeStringTo(t *testing.T) {}
+
+func TestListMonitorsLogicalSizeMirrorsLayoutBox(t *testing.T) {
+	s := newFakeServer(t, func(t *testing.T, parts []string) (string, bool, bool, string) {
+		if len(parts) >= 2 && parts[0] == "get" && parts[1] == "all-monitors" {
+			return mustJSON(t, []map[string]any{
+				{"name": "DP-1", "active": float64(1), "focused": float64(1), "x": float64(0), "y": float64(0), "width": float64(1440), "height": float64(900), "scale": float64(200), "index": float64(0)},
+			}), false, true, ""
+		}
+		return "", true, false, "unexpected"
+	})
+	m := s.Client(t)
+	monitors, err := m.ListMonitors()
+	if err != nil {
+		t.Fatalf("ListMonitors error = %v", err)
+	}
+	// MangoWC serializes its layout box, which is already logical: the
+	// explicit logical fields must mirror width/height, not divide again.
+	if monitors[0].LogicalWidth != 1440 || monitors[0].LogicalHeight != 900 {
+		t.Fatalf("logical = %dx%d, want 1440x900", monitors[0].LogicalWidth, monitors[0].LogicalHeight)
+	}
+	if monitors[0].Scale != 2.0 {
+		t.Fatalf("scale = %v, want 2.0", monitors[0].Scale)
+	}
+}

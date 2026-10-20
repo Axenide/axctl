@@ -1283,3 +1283,75 @@ func TestToggleOverviewAction(t *testing.T) {
 		t.Fatalf("ToggleOverview() error = %v", err)
 	}
 }
+
+func TestListMonitorsScaledLogicalSize(t *testing.T) {
+	f := newFakeNiri(t, func(req json.RawMessage) (any, error) {
+		return map[string]interface{}{
+			"Outputs": map[string]interface{}{
+				"DP-1": map[string]interface{}{
+					"name":         "DP-1",
+					"current_mode": float64(0),
+					"modes": []map[string]interface{}{
+						{"width": float64(2880), "height": float64(1800), "refresh_rate": float64(60000), "is_preferred": true},
+					},
+					"logical": map[string]interface{}{
+						"x":         float64(0),
+						"y":         float64(0),
+						"width":     float64(1440),
+						"height":    float64(900),
+						"scale":     2.0,
+						"transform": "Normal",
+					},
+				},
+			},
+		}, nil
+	})
+	c := f.Client()
+	monitors, err := c.ListMonitors()
+	if err != nil {
+		t.Fatalf("ListMonitors() error = %v", err)
+	}
+	if len(monitors) != 1 {
+		t.Fatalf("monitors = %d, want 1", len(monitors))
+	}
+	m := monitors[0]
+	// Niri reports width/height in logical pixels already; the explicit
+	// logical fields must mirror them, not divide again.
+	if m.Width != 1440 || m.Height != 900 {
+		t.Fatalf("width/height = %dx%d, want 1440x900", m.Width, m.Height)
+	}
+	if m.LogicalWidth != 1440 || m.LogicalHeight != 900 {
+		t.Fatalf("logical = %dx%d, want 1440x900", m.LogicalWidth, m.LogicalHeight)
+	}
+	if m.Scale != 2.0 {
+		t.Fatalf("scale = %v, want 2.0", m.Scale)
+	}
+}
+
+func TestListMonitorsPhysicalFallbackLogicalSize(t *testing.T) {
+	f := newFakeNiri(t, func(req json.RawMessage) (any, error) {
+		return map[string]interface{}{
+			"Outputs": map[string]interface{}{
+				"DP-1": map[string]interface{}{
+					"name":         "DP-1",
+					"current_mode": float64(0),
+					"modes": []map[string]interface{}{
+						{"width": float64(2880), "height": float64(1800), "refresh_rate": float64(60000), "is_preferred": true},
+					},
+				},
+			},
+		}, nil
+	})
+	c := f.Client()
+	monitors, err := c.ListMonitors()
+	if err != nil {
+		t.Fatalf("ListMonitors() error = %v", err)
+	}
+	m := monitors[0]
+	if m.Width != 2880 || m.Height != 1800 {
+		t.Fatalf("physical fallback width/height = %dx%d, want 2880x1800", m.Width, m.Height)
+	}
+	if m.LogicalWidth != 2880 || m.LogicalHeight != 1800 {
+		t.Fatalf("fallback logical (no scale) = %dx%d, want 2880x1800", m.LogicalWidth, m.LogicalHeight)
+	}
+}

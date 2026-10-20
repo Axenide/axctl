@@ -561,6 +561,9 @@ func (h *Hyprland) ListMonitors() ([]ipc.Monitor, error) {
 				"transform":         m.Transform,
 			},
 		}
+		// Hyprland reports width/height in physical pixels and x/y in
+		// logical pixels.
+		res[i].LogicalWidth, res[i].LogicalHeight = ipc.LogicalSizeFromPhysical(m.Width, m.Height, m.Scale)
 	}
 	return res, nil
 }

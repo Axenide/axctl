@@ -1,5 +1,7 @@
 package ipc
 
+import "math"
+
 type Window struct {
 	ID           string                 `json:"id"`
 	Title        string                 `json:"title"`
@@ -22,15 +24,26 @@ type Workspace struct {
 }
 
 type Monitor struct {
-	ID          string                 `json:"id"`
-	Name        string                 `json:"name"`
-	Description string                 `json:"description,omitempty"`
-	Width       int                    `json:"width"`
-	Height      int                    `json:"height"`
-	RefreshRate float64                `json:"refresh_rate,omitempty"`
-	Scale       float64                `json:"scale,omitempty"`
-	IsFocused   bool                   `json:"is_focused"`
-	Metadata    map[string]interface{} `json:"metadata,omitempty"`
+	ID            string                 `json:"id"`
+	Name          string                 `json:"name"`
+	Description   string                 `json:"description,omitempty"`
+	Width         int                    `json:"width"`
+	Height        int                    `json:"height"`
+	LogicalWidth  int                    `json:"logical_width,omitempty"`
+	LogicalHeight int                    `json:"logical_height,omitempty"`
+	RefreshRate   float64                `json:"refresh_rate,omitempty"`
+	Scale         float64                `json:"scale,omitempty"`
+	IsFocused     bool                   `json:"is_focused"`
+	Metadata      map[string]interface{} `json:"metadata,omitempty"`
+}
+
+// LogicalSizeFromPhysical derives logical dimensions from physical mode
+// size and output scale.
+func LogicalSizeFromPhysical(w, h int, scale float64) (int, int) {
+	if scale <= 0 {
+		return w, h
+	}
+	return int(math.Round(float64(w) / scale)), int(math.Round(float64(h) / scale))
 }
 
 type Capabilities struct {
