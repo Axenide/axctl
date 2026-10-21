@@ -2,6 +2,7 @@ package hyprland
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"axctl/pkg/ipc"
@@ -265,6 +266,77 @@ func isDwindleLayoutMsg(arg string) bool {
 	return arg == "rotatesplit" || arg == "togglesplit"
 }
 
+// parseResizeDelta reads a "dx dy" pixel delta as used by the legacy
+// resizeactive dispatcher. Missing or unparsable components become 0.
+func parseResizeDelta(arg string) (int, int) {
+	fields := strings.Fields(arg)
+	dx, dy := 0, 0
+	if len(fields) > 0 {
+		dx, _ = strconv.Atoi(fields[0])
+	}
+	if len(fields) > 1 {
+		dy, _ = strconv.Atoi(fields[1])
+	}
+	return dx, dy
+}
+
+// colresizeFallback maps a signed scrolling colresize delta ("+0.1") to a
+// horizontal pixel delta for non-scrolling layouts. Presets like "+conf"
+// return false: they have no meaningful pixel equivalent.
+func colresizeFallback(arg string) (int, bool) {
+	fields := strings.Fields(arg)
+	if len(fields) < 2 || fields[0] != "colresize" {
+		return 0, false
+	}
+	delta := fields[1]
+	if delta == "+conf" || delta == "-conf" {
+		return 0, false
+	}
+	value, err := strconv.ParseFloat(delta, 64)
+	if err != nil {
+		return 0, false
+	}
+	if value == 0 {
+		return 0, false
+	}
+	if value > 0 {
+		return 50, true
+	}
+	return -50, true
+}
+
+// verticalScrollingResizeLua emits a vertical resize that follows
+// divider-direction semantics: the shared edge moves in the pressed
+// direction, so a window at the bottom of a stacked column shrinks on a
+// downward key. Dwindle behaves that way natively; scrolling normalizes
+// resizeactive to grow-the-focused-window regardless of position, so the
+// generated Lua flips the sign when nothing tiled sits below the focused
+// window in its column. Floating windows and other layouts resize with
+// the plain delta.
+func verticalScrollingResizeLua(dy int) string {
+	return fmt.Sprintf(`function()
+	local w = hl.get_active_window()
+	if w == nil then return end
+	local delta = %d
+	if not w.floating and hl.get_active_workspace().tiled_layout == "scrolling" then
+		local below = false
+		for _, o in ipairs(hl.get_workspace_windows(hl.get_active_workspace())) do
+			if o ~= w and not o.floating then
+				local overlap = math.min(w.at.x + w.size.x, o.at.x + o.size.x) - math.max(w.at.x, o.at.x)
+				if overlap > 0 and o.at.y >= w.at.y + w.size.y - 10 then
+					below = true
+					break
+				end
+			end
+		end
+		if not below then
+			delta = %d
+		end
+	end
+	hl.dispatch(hl.dsp.window.resize({ x = 0, y = delta, relative = true }))
+end`, dy, -dy)
+}
+
 func dispatcherToLua(dispatcher, arg string) string {
 	switch dispatcher {
 	case "killactive":
@@ -324,6 +396,25 @@ func dispatcherToLua(dispatcher, arg string) string {
 			return "hl.dsp.window.resize()"
 		}
 		return fmt.Sprintf("hl.dsp.window.resize({ %s })", arg)
+	case "resizeactive":
+		// "resizeactive dx dy" is a pixel delta. The Lua dsp takes an
+		// absolute size unless `relative = true`, and exec_cmd is not an
+		// option: it spawns a shell process, it does not dispatch.
+		dx, dy := parseResizeDelta(arg)
+		if dx == 0 && dy != 0 {
+			// Purely vertical deltas follow divider-direction semantics:
+			// dwindle moves the shared edge in the pressed direction
+			// (bottom window shrinks on a downward key), but scrolling
+			// normalizes to grow-the-focused-window. Compensate there.
+			return verticalScrollingResizeLua(dy)
+		}
+		return fmt.Sprintf("hl.dsp.window.resize({ x = %d, y = %d, relative = true })", dx, dy)
+	case "cyclenext", "cycleprev":
+		next := "true"
+		if dispatcher == "cycleprev" {
+			next = "false"
+		}
+		return fmt.Sprintf("hl.dsp.window.cycle_next({ next = %s })", next)
 	case "movetoworkspace":
 		return fmt.Sprintf("hl.dsp.window.move({ workspace = %q })", arg)
 	case "movetoworkspacesilent":
@@ -350,6 +441,15 @@ func dispatcherToLua(dispatcher, arg string) string {
 		return fmt.Sprintf("hl.dsp.dpms({ action = %q })", arg)
 	case "layoutmsg":
 		if isScrollingLayoutMsg(arg) {
+			// Numeric colresize deltas also cover non-scrolling layouts:
+			// horizontal resize falls back to a pixel delta on the active
+			// window (floating, dwindle, master). Presets like "+conf"
+			// have no equivalent elsewhere, so they stay gated.
+			if fallback, ok := colresizeFallback(arg); ok {
+				return fmt.Sprintf(
+					"function() local w = hl.get_active_window(); if w == nil then return end; if w.floating or hl.get_active_workspace().tiled_layout ~= \"scrolling\" then hl.dispatch(hl.dsp.window.resize({ x = %d, y = 0, relative = true })) else hl.dispatch(hl.dsp.layout(%q)) end end",
+					fallback, arg)
+			}
 			return fmt.Sprintf(
 				"function() if hl.get_active_workspace().tiled_layout == \"scrolling\" then hl.dispatch(hl.dsp.layout(%q)) end end", arg)
 		}

@@ -224,3 +224,116 @@ func TestDispatcherToLuaFullscreenModes(t *testing.T) {
 		}
 	}
 }
+
+func TestDispatcherToLuaResizeactive(t *testing.T) {
+	// The legacy resizeactive dispatcher is a pixel delta. It must map to
+	// the Lua dsp with relative = true; exec_cmd would spawn a shell
+	// process instead of dispatching.
+	cases := []struct {
+		arg      string
+		wantAny  []string
+		wantNone []string
+	}{
+		{
+			// Horizontal deltas stay plain.
+			arg:     "50 0",
+			wantAny: []string{`hl.dsp.window.resize({ x = 50, y = 0, relative = true })`},
+		},
+		{
+			arg:     "-50 0",
+			wantAny: []string{`hl.dsp.window.resize({ x = -50, y = 0, relative = true })`},
+		},
+		{
+			// Vertical deltas flip sign in scrolling when nothing tiled
+			// sits below the focused window (divider-direction resize).
+			arg: "0 50",
+			wantAny: []string{
+				`tiled_layout == "scrolling"`,
+				`local delta = 50`,
+				`delta = -50`,
+				`relative = true`,
+			},
+			wantNone: []string{`exec_cmd`},
+		},
+		{
+			arg: "0 -50",
+			wantAny: []string{
+				`local delta = -50`,
+				`delta = 50`,
+			},
+			wantNone: []string{`exec_cmd`},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.arg, func(t *testing.T) {
+			lua := dispatcherToLua("resizeactive", c.arg)
+			for _, want := range c.wantAny {
+				if !strings.Contains(lua, want) {
+					t.Errorf("resizeactive %q: missing %q in:\n%s", c.arg, want, lua)
+				}
+			}
+			for _, unwanted := range c.wantNone {
+				if strings.Contains(lua, unwanted) {
+					t.Errorf("resizeactive %q: unexpected %q in:\n%s", c.arg, unwanted, lua)
+				}
+			}
+		})
+	}
+}
+
+func TestDispatcherToLuaCycleNext(t *testing.T) {
+	if lua := dispatcherToLua("cyclenext", "next"); !strings.Contains(lua, `hl.dsp.window.cycle_next({ next = true })`) {
+		t.Errorf("cyclenext: got:\n%s", lua)
+	}
+	if lua := dispatcherToLua("cycleprev", "prev"); !strings.Contains(lua, `hl.dsp.window.cycle_next({ next = false })`) {
+		t.Errorf("cycleprev: got:\n%s", lua)
+	}
+}
+
+func TestDispatcherToLuaColresizeFallback(t *testing.T) {
+	cases := []struct {
+		arg      string
+		wantAny  []string
+		wantNone []string
+	}{
+		{
+			arg: "colresize +0.1",
+			wantAny: []string{
+				`w.floating or hl.get_active_workspace().tiled_layout ~= "scrolling"`,
+				`x = 50, y = 0, relative = true`,
+				`hl.dsp.layout("colresize +0.1")`,
+			},
+		},
+		{
+			arg: "colresize -0.1",
+			wantAny: []string{
+				`x = -50, y = 0, relative = true`,
+				`hl.dsp.layout("colresize -0.1")`,
+			},
+		},
+		{
+			arg: "colresize +conf",
+			wantAny: []string{
+				`hl.dsp.layout("colresize +conf")`,
+			},
+			wantNone: []string{
+				`relative = true`,
+			},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.arg, func(t *testing.T) {
+			lua := dispatcherToLua("layoutmsg", c.arg)
+			for _, want := range c.wantAny {
+				if !strings.Contains(lua, want) {
+					t.Errorf("layoutmsg %q: missing %q in:\n%s", c.arg, want, lua)
+				}
+			}
+			for _, unwanted := range c.wantNone {
+				if strings.Contains(lua, unwanted) {
+					t.Errorf("layoutmsg %q: unexpected %q in:\n%s", c.arg, unwanted, lua)
+				}
+			}
+		})
+	}
+}
