@@ -397,3 +397,98 @@ func TestListMonitorsLogicalSize(t *testing.T) {
 		t.Fatalf("scale-1 logical = %dx%d, want 1920x1080", monitors[1].LogicalWidth, monitors[1].LogicalHeight)
 	}
 }
+
+func TestListMonitors057SpecialWorkspaceVisible(t *testing.T) {
+	responses := map[string]string{
+		"j/monitors": `[{"id":0,"name":"HDMI-A-1","width":1920,"height":1080,"refreshRate":60.0,"focused":true,"scale":1.0,"x":0,"y":0,"transform":0,"activeWorkspace":{"address":"3","id":3,"type":"normal","name":"3"},"specialWorkspace":{"address":"special:magic","type":"special","name":"special:magic"}}]`,
+	}
+	runFakeHyprlandSocketWith(t, []string{`{"version":"0.57.0"}`}, responses)
+	h := &Hyprland{signature: "test"}
+
+	monitors, err := h.ListMonitors()
+	if err != nil {
+		t.Fatalf("ListMonitors() error = %v", err)
+	}
+	if got := monitors[0].Metadata["visible_workspace"]; got != "special:magic" {
+		t.Fatalf("visible_workspace = %v, want special:magic", got)
+	}
+	if got := monitors[0].Metadata["active_workspace"]; got != "3" {
+		t.Fatalf("active_workspace = %v, want 3", got)
+	}
+}
+
+func TestListMonitors057SpecialWorkspaceClosed(t *testing.T) {
+	responses := map[string]string{
+		"j/monitors": `[{"id":0,"name":"HDMI-A-1","width":1920,"height":1080,"refreshRate":60.0,"focused":true,"scale":1.0,"x":0,"y":0,"transform":0,"activeWorkspace":{"address":"3","id":3,"type":"normal","name":"3"},"specialWorkspace":{"address":"","type":"","name":""}}]`,
+	}
+	runFakeHyprlandSocketWith(t, []string{`{"version":"0.57.0"}`}, responses)
+	h := &Hyprland{signature: "test"}
+
+	monitors, err := h.ListMonitors()
+	if err != nil {
+		t.Fatalf("ListMonitors() error = %v", err)
+	}
+	if got := monitors[0].Metadata["visible_workspace"]; got != "3" {
+		t.Fatalf("visible_workspace = %v, want 3", got)
+	}
+}
+
+func TestListMonitorsLegacySpecialWorkspaceVisible(t *testing.T) {
+	responses := map[string]string{
+		"j/monitors": `[{"id":0,"name":"HDMI-A-1","width":1920,"height":1080,"refreshRate":60.0,"focused":true,"scale":1.0,"x":0,"y":0,"transform":0,"activeWorkspace":{"id":3,"name":"3"},"specialWorkspace":{"id":-99,"name":"special"}}]`,
+	}
+	runFakeHyprlandSocketWith(t, []string{`{"version":"0.56.0"}`}, responses)
+	h := &Hyprland{signature: "test"}
+
+	monitors, err := h.ListMonitors()
+	if err != nil {
+		t.Fatalf("ListMonitors() error = %v", err)
+	}
+	if got := monitors[0].Metadata["visible_workspace"]; got != "-99" {
+		t.Fatalf("visible_workspace = %v, want -99", got)
+	}
+}
+
+func TestListWindows057SpecialWorkspaceAddress(t *testing.T) {
+	responses := map[string]string{
+		"j/clients": `[{"address":"0xabc","title":"term","class":"ghostty","floating":false,"fullscreen":0,"fullscreenClient":0,"pinned":false,"monitor":0,"at":[0,0],"size":[800,600],"workspace":{"address":"special:magic","type":"special","name":"special:magic"}},
+			{"address":"0xdef","title":"edit","class":"code","floating":false,"fullscreen":0,"fullscreenClient":0,"pinned":false,"monitor":0,"at":[0,0],"size":[800,600],"workspace":{"address":"3","id":3,"type":"normal","name":"3"}}]`,
+	}
+	runFakeHyprlandSocketWith(t, []string{`{"version":"0.57.0"}`}, responses)
+	h := &Hyprland{signature: "test"}
+
+	windows, err := h.ListWindows()
+	if err != nil {
+		t.Fatalf("ListWindows() error = %v", err)
+	}
+	if windows[0].WorkspaceID != "special:magic" {
+		t.Fatalf("special window workspace_id = %q, want special:magic", windows[0].WorkspaceID)
+	}
+	if windows[1].WorkspaceID != "3" {
+		t.Fatalf("normal window workspace_id = %q, want 3", windows[1].WorkspaceID)
+	}
+}
+
+func TestListWorkspaces057UsesAddressIdentity(t *testing.T) {
+	responses := map[string]string{
+		"j/workspaces": `[{"address":"special:magic","type":"special","name":"special:magic","monitor":"HDMI-A-1","monitorID":0},
+			{"address":"3","id":3,"type":"normal","name":"3","monitor":"HDMI-A-1","monitorID":0}]`,
+		"j/activeworkspace": `{"address":"special:magic","type":"special","name":"special:magic","monitor":"HDMI-A-1","monitorID":0}`,
+	}
+	runFakeHyprlandSocketWith(t, []string{`{"version":"0.57.0"}`}, responses)
+	h := &Hyprland{signature: "test"}
+
+	workspaces, err := h.ListWorkspaces()
+	if err != nil {
+		t.Fatalf("ListWorkspaces() error = %v", err)
+	}
+	if workspaces[0].ID != "special:magic" {
+		t.Fatalf("special workspace id = %q, want special:magic", workspaces[0].ID)
+	}
+	if !workspaces[0].IsActive {
+		t.Fatalf("special workspace should be active")
+	}
+	if workspaces[1].ID != "3" || workspaces[1].IsActive {
+		t.Fatalf("normal workspace id = %q active = %v, want 3/false", workspaces[1].ID, workspaces[1].IsActive)
+	}
+}

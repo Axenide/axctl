@@ -17,11 +17,12 @@ import (
 )
 
 type Hyprland struct {
-	signature      string
-	mu             sync.Mutex
-	versionMu      sync.Mutex
-	versionKnown   bool
-	useLuaDispatch bool
+	signature         string
+	mu                sync.Mutex
+	versionMu         sync.Mutex
+	versionKnown      bool
+	useLuaDispatch    bool
+	addressWorkspaces bool
 }
 
 func New() (*Hyprland, error) {
@@ -63,31 +64,66 @@ func (h *Hyprland) dispatch(cmd string) (string, error) {
 	return resp, nil
 }
 
-func (h *Hyprland) supportsLuaDispatchers() bool {
+func (h *Hyprland) versionInfo() (luaDispatch bool, addressWorkspaces bool) {
 	h.versionMu.Lock()
 	if h.versionKnown {
-		useLuaDispatch := h.useLuaDispatch
+		lua, addr := h.useLuaDispatch, h.addressWorkspaces
 		h.versionMu.Unlock()
-		return useLuaDispatch
+		return lua, addr
 	}
 	h.versionMu.Unlock()
 
 	resp, err := h.dispatch("j/version")
 	if err != nil {
-		return false
+		return false, false
 	}
 
 	version, err := parseHyprlandVersion(resp)
 	if err != nil {
-		return false
+		return false, false
 	}
 
-	useLuaDispatch := isHyprlandVersionAtLeast(version, 0, 55)
+	luaDispatch = isHyprlandVersionAtLeast(version, 0, 55)
+	// Hyprland 0.57 reworked workspace identities: workspaces gained a
+	// string address and special workspaces stopped exposing a numeric id.
+	addressWorkspaces = isHyprlandVersionAtLeast(version, 0, 57)
+
 	h.versionMu.Lock()
-	h.useLuaDispatch = useLuaDispatch
+	h.useLuaDispatch = luaDispatch
+	h.addressWorkspaces = addressWorkspaces
 	h.versionKnown = true
 	h.versionMu.Unlock()
-	return useLuaDispatch
+	return luaDispatch, addressWorkspaces
+}
+
+func (h *Hyprland) supportsLuaDispatchers() bool {
+	lua, _ := h.versionInfo()
+	return lua
+}
+
+func (h *Hyprland) usesAddressWorkspaces() bool {
+	_, addr := h.versionInfo()
+	return addr
+}
+
+// workspaceIdentity returns the canonical workspace identifier. On 0.57+
+// the address is the only id every workspace has (specials lost their
+// numeric id); older versions keep the numeric id.
+func (h *Hyprland) workspaceIdentity(address string, id int) string {
+	if h.usesAddressWorkspaces() && address != "" {
+		return address
+	}
+	return fmt.Sprintf("%d", id)
+}
+
+// specialWorkspaceOpen reports whether the monitor JSON says a special
+// workspace is open. Old Hyprland flagged it with the numeric id (-99);
+// 0.57 keeps only the name and address.
+func specialWorkspaceOpen(name, address string, id int) bool {
+	if name == "" {
+		return false
+	}
+	return address != "" || id != 0
 }
 
 func (h *Hyprland) dispatchVersioned(legacy, lua string) (string, error) {
@@ -220,7 +256,8 @@ func (h *Hyprland) ListWindows() ([]ipc.Window, error) {
 		At               []int  `json:"at"`
 		Size             []int  `json:"size"`
 		Workspace        struct {
-			ID int `json:"id"`
+			ID      int    `json:"id"`
+			Address string `json:"address"`
 		} `json:"workspace"`
 	}
 
@@ -235,7 +272,7 @@ func (h *Hyprland) ListWindows() ([]ipc.Window, error) {
 			ID:          c.Address,
 			Title:       c.Title,
 			AppID:       c.Class,
-			WorkspaceID: fmt.Sprintf("%d", c.Workspace.ID),
+			WorkspaceID: h.workspaceIdentity(c.Workspace.Address, c.Workspace.ID),
 			IsFocused:   false, // Will be updated if active
 			IsFloating:  c.Floating,
 			// Only true fullscreen counts as fullscreen: the internal
@@ -430,6 +467,7 @@ func (h *Hyprland) ListWorkspaces() ([]ipc.Workspace, error) {
 
 	var workspaces []struct {
 		ID      int    `json:"id"`
+		Address string `json:"address"`
 		Name    string `json:"name"`
 		Monitor string `json:"monitor"`
 	}
@@ -440,22 +478,28 @@ func (h *Hyprland) ListWorkspaces() ([]ipc.Workspace, error) {
 
 	activeResp, _ := h.dispatch("j/activeworkspace")
 	var activeWS struct {
-		ID int `json:"id"`
+		ID      int    `json:"id"`
+		Address string `json:"address"`
 	}
+	activeID := ""
 	if activeResp != "" {
-		json.Unmarshal([]byte(activeResp), &activeWS)
+		if err := json.Unmarshal([]byte(activeResp), &activeWS); err == nil {
+			activeID = h.workspaceIdentity(activeWS.Address, activeWS.ID)
+		}
 	}
 
 	res := make([]ipc.Workspace, len(workspaces))
 	for i, w := range workspaces {
+		id := h.workspaceIdentity(w.Address, w.ID)
+		isActive := activeID != "" && id == activeID
 		res[i] = ipc.Workspace{
-			ID:        fmt.Sprintf("%d", w.ID),
+			ID:        id,
 			Name:      w.Name,
 			MonitorID: w.Monitor,
-			IsActive:  w.ID == activeWS.ID,
+			IsActive:  isActive,
 			IsEmpty:   false, // Not directly available from basic j/workspaces without parsing windows
 			Metadata: map[string]interface{}{
-				"focused": w.ID == activeWS.ID,
+				"focused": isActive,
 			},
 		}
 	}
@@ -469,6 +513,7 @@ func (h *Hyprland) ActiveWorkspace() (*ipc.Workspace, error) {
 	}
 	var ws struct {
 		ID      int    `json:"id"`
+		Address string `json:"address"`
 		Name    string `json:"name"`
 		Monitor string `json:"monitor"`
 	}
@@ -476,7 +521,7 @@ func (h *Hyprland) ActiveWorkspace() (*ipc.Workspace, error) {
 		return nil, err
 	}
 	return &ipc.Workspace{
-		ID:        fmt.Sprintf("%d", ws.ID),
+		ID:        h.workspaceIdentity(ws.Address, ws.ID),
 		Name:      ws.Name,
 		MonitorID: ws.Monitor,
 		IsActive:  true,
@@ -522,12 +567,14 @@ func (h *Hyprland) ListMonitors() ([]ipc.Monitor, error) {
 		Y               int     `json:"y"`
 		Transform       int     `json:"transform"`
 		ActiveWorkspace struct {
-			ID   int    `json:"id"`
-			Name string `json:"name"`
+			ID      int    `json:"id"`
+			Address string `json:"address"`
+			Name    string `json:"name"`
 		} `json:"activeWorkspace"`
 		SpecialWorkspace struct {
-			ID   int    `json:"id"`
-			Name string `json:"name"`
+			ID      int    `json:"id"`
+			Address string `json:"address"`
+			Name    string `json:"name"`
 		} `json:"specialWorkspace"`
 	}
 
@@ -539,10 +586,13 @@ func (h *Hyprland) ListMonitors() ([]ipc.Monitor, error) {
 	for i, m := range monitors {
 		// The special workspace overlays the regular one (activeWorkspace
 		// keeps pointing at the workspace underneath), so the workspace the
-		// user actually sees is the special one while it is open.
-		visibleWS := m.ActiveWorkspace.ID
-		if m.SpecialWorkspace.Name != "" && m.SpecialWorkspace.ID != 0 {
-			visibleWS = m.SpecialWorkspace.ID
+		// user actually sees is the special one while it is open. Since
+		// 0.57 the special workspace carries no numeric id, so the open
+		// check relies on the name/address instead.
+		activeID := h.workspaceIdentity(m.ActiveWorkspace.Address, m.ActiveWorkspace.ID)
+		visibleID := activeID
+		if specialWorkspaceOpen(m.SpecialWorkspace.Name, m.SpecialWorkspace.Address, m.SpecialWorkspace.ID) {
+			visibleID = h.workspaceIdentity(m.SpecialWorkspace.Address, m.SpecialWorkspace.ID)
 		}
 		res[i] = ipc.Monitor{
 			ID:          fmt.Sprintf("%d", m.ID),
@@ -554,8 +604,8 @@ func (h *Hyprland) ListMonitors() ([]ipc.Monitor, error) {
 			Scale:       m.Scale,
 			IsFocused:   m.Focused,
 			Metadata: map[string]interface{}{
-				"active_workspace":  fmt.Sprintf("%d", m.ActiveWorkspace.ID),
-				"visible_workspace": fmt.Sprintf("%d", visibleWS),
+				"active_workspace":  activeID,
+				"visible_workspace": visibleID,
 				"x":                 m.X,
 				"y":                 m.Y,
 				"transform":         m.Transform,
