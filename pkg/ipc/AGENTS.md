@@ -8,7 +8,7 @@ This package contains the core abstraction layer for Wayland compositors. Each s
 pkg/ipc/
 ├── hyprland/    # Socket2 + Dispatcher implementation
 ├── niri/        # JSON-RPC request/reply implementation
-├── mango/       # Text-based socket implementation
+├── mango/       # mmsg Unix socket queries, dispatches, and watches
 ├── mock/        # Test utilities and interface mocks
 ├── interface.go # The unified Compositor interface
 └── types.go     # Shared domain models (Window, Workspace, Event)

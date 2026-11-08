@@ -38,6 +38,11 @@ func ApplyConfig(cfg *TOMLConfig, compositor ipc.Compositor, configDir string) e
 	if err := handler.ApplyConfig(ipcCfg); err != nil {
 		return fmt.Errorf("failed to apply config: %w", err)
 	}
+	if cfg.Input != nil {
+		if err := applyKeyboardConfig(compositor, cfg.Input.Keyboard); err != nil {
+			return fmt.Errorf("failed to apply keyboard config: %w", err)
+		}
+	}
 
 	// Headless pass: render the inactive compositors whose targets are
 	// declared. Only the file write — no reload, since the compositor
@@ -86,6 +91,17 @@ func ApplyConfig(cfg *TOMLConfig, compositor ipc.Compositor, configDir string) e
 	}
 
 	return nil
+}
+
+type keyboardLayoutSetter interface {
+	SetKeyboardLayouts(layouts string, variants string) error
+}
+
+func applyKeyboardConfig(compositor keyboardLayoutSetter, keyboard *KeyboardConfig) error {
+	if keyboard == nil || strings.TrimSpace(keyboard.Layouts) == "" {
+		return nil
+	}
+	return compositor.SetKeyboardLayouts(strings.TrimSpace(keyboard.Layouts), strings.TrimSpace(keyboard.Variants))
 }
 
 // writeConfig renders the universal config with the given generator and

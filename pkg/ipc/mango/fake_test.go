@@ -188,6 +188,7 @@ func (s *fakeServer) Client(t *testing.T) *Mango {
 		t.Fatalf("dialMango: %v", err)
 	}
 	m.conn = conn
+	t.Cleanup(func() { _ = m.Close() })
 	return m
 }
 

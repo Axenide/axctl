@@ -111,7 +111,7 @@ func usage() {
 	fmt.Println("    move-to <ws_id> [win_id] Move window to workspace")
 	fmt.Println("    toggle-special [name]   Toggle special workspace")
 	fmt.Println("\n  overview <action>")
-	fmt.Println("    toggle                  Toggle the compositor overview (niri only)")
+	fmt.Println("    toggle                  Toggle the compositor overview (Niri/Mango)")
 	fmt.Println("\n  monitor <action> [args]")
 	fmt.Println("    list                    List all monitors")
 	fmt.Println("    focus <id>              Focus monitor")
@@ -129,7 +129,9 @@ func usage() {
 	fmt.Println("                            Keys: gaps.inner, gaps.outer, border.width,")
 	fmt.Println("                                  border.active_color, border.inactive_color,")
 	fmt.Println("                                  opacity.active, opacity.inactive,")
-	fmt.Println("                                  blur.enabled, blur.size, blur.passes")
+	fmt.Println("                                  border.rounding, blur.enabled, blur.size,")
+	fmt.Println("                                  blur.passes, shadow.enabled, shadow.size,")
+	fmt.Println("                                  shadow.color, animations.enabled")
 	fmt.Println("    batch <json_string>     Batch apply configs")
 	fmt.Println("    apply <json_string>     Apply declarative universal config payload")
 	fmt.Println("    raw-batch <command>     Send raw compositor batch command")
@@ -245,20 +247,29 @@ func runDaemon(customConfigPath string) {
 	var comp ipc.Compositor
 	var err error
 
-	comp, err = hyprland.New()
-	if err == nil {
+	if mango.SessionDetected() {
+		comp, err = mango.New()
+		if err != nil {
+			fmt.Printf("Error: Mango was detected but its IPC socket is unavailable: %v\n", err)
+			os.Exit(1)
+		}
 		fmt.Println("Detected compositor:", comp)
 	} else {
-		comp, err = niri.New()
+		comp, err = hyprland.New()
 		if err == nil {
 			fmt.Println("Detected compositor:", comp)
 		} else {
-			comp, err = mango.New()
+			comp, err = niri.New()
 			if err == nil {
 				fmt.Println("Detected compositor:", comp)
 			} else {
-				fmt.Println("Error: no supported compositor detected")
-				os.Exit(1)
+				comp, err = mango.New()
+				if err == nil {
+					fmt.Println("Detected compositor:", comp)
+				} else {
+					fmt.Println("Error: no supported compositor detected")
+					os.Exit(1)
+				}
 			}
 		}
 	}

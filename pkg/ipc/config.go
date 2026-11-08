@@ -42,7 +42,7 @@ type Shadow struct {
 
 // Animations config
 type Animations struct {
-	Enabled        *bool   `json:"enabled,omitempty"`
+	Enabled *bool `json:"enabled,omitempty"`
 	// WorkspaceStyle overrides the default 'slidefade 20%' used for
 	// the workspaces animation in the generated hyprland.{lua,conf}.
 	// Shell code (e.g. ambxst) computes this from the bar orientation:
@@ -232,6 +232,11 @@ func SetAppearanceKey(a *ConfigAppearance, key string, value interface{}) bool {
 			a.ensureBorder().Width = v
 			return true
 		}
+	case "border.rounding":
+		if v, ok := coerceInt(value); ok {
+			a.ensureBorder().Rounding = v
+			return true
+		}
 	case "border.active_color":
 		if v, ok := coerceString(value); ok {
 			a.ensureBorder().ActiveColor = v
@@ -267,6 +272,26 @@ func SetAppearanceKey(a *ConfigAppearance, key string, value interface{}) bool {
 			a.ensureBlur().Passes = v
 			return true
 		}
+	case "shadow.enabled":
+		if v, ok := coerceBool(value); ok {
+			a.ensureShadow().Enabled = v
+			return true
+		}
+	case "shadow.size":
+		if v, ok := coerceInt(value); ok {
+			a.ensureShadow().Size = v
+			return true
+		}
+	case "shadow.color":
+		if v, ok := coerceString(value); ok {
+			a.ensureShadow().Color = v
+			return true
+		}
+	case "animations.enabled":
+		if v, ok := coerceBool(value); ok {
+			a.ensureAnimations().Enabled = v
+			return true
+		}
 	}
 	return false
 }
@@ -291,6 +316,11 @@ func GetAppearanceKey(a *ConfigAppearance, key string) (interface{}, bool) {
 			return nil, true
 		}
 		return derefInt(a.Border.Width), true
+	case "border.rounding":
+		if a.Border == nil {
+			return nil, true
+		}
+		return derefInt(a.Border.Rounding), true
 	case "border.active_color":
 		if a.Border == nil {
 			return nil, true
@@ -326,6 +356,26 @@ func GetAppearanceKey(a *ConfigAppearance, key string) (interface{}, bool) {
 			return nil, true
 		}
 		return derefInt(a.Blur.Passes), true
+	case "shadow.enabled":
+		if a.Shadow == nil {
+			return nil, true
+		}
+		return derefBool(a.Shadow.Enabled), true
+	case "shadow.size":
+		if a.Shadow == nil {
+			return nil, true
+		}
+		return derefInt(a.Shadow.Size), true
+	case "shadow.color":
+		if a.Shadow == nil {
+			return nil, true
+		}
+		return derefString(a.Shadow.Color), true
+	case "animations.enabled":
+		if a.Animations == nil {
+			return nil, true
+		}
+		return derefBool(a.Animations.Enabled), true
 	}
 	return nil, false
 }
@@ -356,6 +406,20 @@ func (a *ConfigAppearance) ensureBlur() *Blur {
 		a.Blur = &Blur{}
 	}
 	return a.Blur
+}
+
+func (a *ConfigAppearance) ensureShadow() *Shadow {
+	if a.Shadow == nil {
+		a.Shadow = &Shadow{}
+	}
+	return a.Shadow
+}
+
+func (a *ConfigAppearance) ensureAnimations() *Animations {
+	if a.Animations == nil {
+		a.Animations = &Animations{}
+	}
+	return a.Animations
 }
 
 // coerceInt accepts JSON-decoded numbers (float64), Go integers, and

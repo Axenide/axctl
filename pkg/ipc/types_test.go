@@ -26,3 +26,23 @@ func TestLogicalSizeFromPhysical(t *testing.T) {
 		})
 	}
 }
+
+func TestAppearanceKeyRoundTripForGeneratedConfig(t *testing.T) {
+	appearance := ConfigAppearance{}
+	values := map[string]interface{}{
+		"border.rounding":    8,
+		"shadow.enabled":     true,
+		"shadow.size":        12,
+		"shadow.color":       "#000000aa",
+		"animations.enabled": false,
+	}
+	for key, value := range values {
+		if !SetAppearanceKey(&appearance, key, value) {
+			t.Fatalf("SetAppearanceKey(%q) rejected value %v", key, value)
+		}
+		got, ok := GetAppearanceKey(&appearance, key)
+		if !ok || got != value {
+			t.Fatalf("GetAppearanceKey(%q) = %#v, %v; want %#v", key, got, ok, value)
+		}
+	}
+}

@@ -76,4 +76,4 @@ go build -o axctl .
 ## NOTES
 - **Hyprland**: Uses `$HYPRLAND_INSTANCE_SIGNATURE` for socket paths.
 - **Niri**: Uses `$NIRI_SOCKET` for IPC.
-- **Mango**: Uses `/run/user/$UID/mango.sock`.
+- **Mango**: Uses `MANGO_INSTANCE_SIGNATURE` (normally `$XDG_RUNTIME_DIR/mango-$PID.sock`) and can discover the live socket when the Mango desktop is detected.

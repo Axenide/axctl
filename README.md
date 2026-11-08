@@ -115,9 +115,8 @@ axctl workspace move-to <workspace_id> [window_id]
 axctl overview toggle
 ```
 
-Toggles the compositor's overview. Only niri implements it
-(`ToggleOverview` IPC action); other compositors return
-"feature not supported".
+Toggles the compositor's overview. Niri and Mango implement it; Hyprland
+returns "feature not supported".
 
 ### Monitor
 
@@ -144,9 +143,10 @@ axctl config reload
 
 Supported config keys include:
 
-`gaps.inner`, `gaps.outer`, `border.width`, `border.active_color`,
-`border.inactive_color`, `opacity.active`, `opacity.inactive`, `blur.enabled`,
-`blur.size`, `blur.passes`.
+`gaps.inner`, `gaps.outer`, `border.width`, `border.rounding`,
+`border.active_color`, `border.inactive_color`, `opacity.active`,
+`opacity.inactive`, `blur.enabled`, `blur.size`, `blur.passes`, `shadow.enabled`,
+`shadow.size`, `shadow.color`, `animations.enabled`.
 
 ### System
 
@@ -187,8 +187,12 @@ notification on the subscribe channel with `{monitor, value}`.
 ### Notes on IDs
 
 Window, workspace, and monitor IDs are compositor-defined. Treat them as
-strings in scripts because Hyprland can use hexadecimal IDs while Niri uses
-integers.
+strings in scripts because Hyprland can use hexadecimal IDs while Niri and
+Mango use numeric window IDs. Mango workspace IDs include the monitor, for
+example `DP-1:3`, because each monitor has its own tag 3. Numeric workspace
+arguments such as `3` continue to target the currently selected monitor. Mango
+window metadata includes every assigned tag because a window can belong to
+multiple tags.
 
 ## Configuration
 
@@ -234,9 +238,11 @@ See `pkg/config/example.toml` for the full configuration reference.
 The daemon uses these environment variables to detect sockets:
 
 - `XDG_RUNTIME_DIR` for Wayland sockets
-- `WAYLAND_DISPLAY` for Mango fallback
 - `NIRI_SOCKET` for Niri (optional; auto-discovered from `$XDG_RUNTIME_DIR/niri*.sock` when unset)
 - `HYPRLAND_INSTANCE_SIGNATURE` for Hyprland
+- `MANGO_INSTANCE_SIGNATURE` for Mango's native IPC socket (normally an
+  absolute path such as `$XDG_RUNTIME_DIR/mango-<pid>.sock`). When unset,
+  axctl detects `XDG_CURRENT_DESKTOP=mango` and discovers a live Mango socket.
 
 The daemon listens on:
 
@@ -301,6 +307,38 @@ Niri requirements:
   - These are plain release binds (`bindr`); check the generated config and
     `hyprctl binds` (or the MangoWC equivalent) for the `Super_L` entry, and
     make sure no later bind or user config overrides it.
+
+### Mango IPC notes
+
+Mango uses one Unix-socket connection per query or dispatch and one connection
+per event watch. Axctl follows that protocol directly; it does not invoke
+`mmsg` as a subprocess. Workspaces are Mango tags, including the special tag 0.
+Named special workspaces and silent moves to another monitor have no equivalent
+in Mango and return "feature not supported". Mango's IPC does not distinguish
+an active special tag 0 from overview in its active-tag status, so that
+workspace active-state detail is ambiguous.
+Mango can switch keyboard layouts to the next layout or to a numeric index;
+the IPC does not expose a reliable previous-layout action.
+
+The generated Mango config uses the current `.conf` option names. Include the
+generated file from your Mango root config, for example:
+
+```ini
+source=~/.config/axctl/mango/axctl.generated.conf
+```
+
+Generated keybind changes are applied by reloading Mango's root config.
+Mango's IPC has no runtime unbind operation; a keybind that also exists in the
+root config may therefore conflict with the generated bind.
+
+From a Mango session, run the optional live checks with:
+
+```bash
+AXCTL_MANGO_LIVE=1 go test ./pkg/ipc/mango -run '^TestMangoLive' -count=1
+```
+
+They query the active session, validate a temporary generated config with
+`mango -p`, and toggle overview twice when the active-tag state is unambiguous.
 
 ## Development
 

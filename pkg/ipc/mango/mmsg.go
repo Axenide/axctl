@@ -21,11 +21,13 @@ func looksLikeReply(b []byte) bool {
 	if len(b) == 0 || b[0] != '{' {
 		return false
 	}
-	var r wireReply
+	var r map[string]json.RawMessage
 	if err := json.Unmarshal(b, &r); err != nil {
 		return false
 	}
-	return r.Success || r.Error != ""
+	_, hasSuccess := r["success"]
+	_, hasError := r["error"]
+	return hasSuccess || hasError
 }
 
 type mmsgConn struct {
@@ -46,7 +48,7 @@ func dialMango(socketPath string, timeout time.Duration) (*mmsgConn, error) {
 }
 
 func (m *mmsgConn) Close() error {
-	if m == nil || m.conn == nil {
+	if m == nil {
 		return nil
 	}
 	m.mu.Lock()
@@ -62,6 +64,11 @@ func (m *mmsgConn) Close() error {
 func (m *mmsgConn) Query(request string, out interface{}) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	defer m.closeLocked()
+	if m.conn == nil {
+		return fmt.Errorf("connection closed")
+	}
+	_ = m.conn.SetDeadline(time.Now().Add(5 * time.Second))
 	if err := m.writeLine(request); err != nil {
 		return err
 	}
@@ -94,6 +101,11 @@ func (m *mmsgConn) Query(request string, out interface{}) error {
 func (m *mmsgConn) Dispatch(payload string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	defer m.closeLocked()
+	if m.conn == nil {
+		return fmt.Errorf("connection closed")
+	}
+	_ = m.conn.SetDeadline(time.Now().Add(5 * time.Second))
 	if err := m.writeLine("dispatch " + payload); err != nil {
 		return err
 	}
@@ -109,9 +121,16 @@ func (m *mmsgConn) Dispatch(payload string) error {
 		if r.Error != "" {
 			return fmt.Errorf("dispatch %q: %s", payload, r.Error)
 		}
-		return fmt.Errorf("dispatch %q: failed", payload)
+		return fmt.Errorf("dispatch %q: failed: %s", payload, string(line))
 	}
 	return nil
+}
+
+func (m *mmsgConn) closeLocked() {
+	if m.conn != nil {
+		_ = m.conn.Close()
+		m.conn = nil
+	}
 }
 
 func (m *mmsgConn) WriteRawLine(payload string) error {

@@ -168,14 +168,14 @@ func TestConfigHandlerWritesMangoAndReloads(t *testing.T) {
 		t.Fatalf("read generated: %v", err)
 	}
 	content := string(data)
-	if !strings.Contains(content, "gappih = 5") {
-		t.Fatalf("expected gappih = 5, got: %s", content)
+	if !strings.Contains(content, "gap_inner_horizontal = 5") {
+		t.Fatalf("expected gap_inner_horizontal = 5, got: %s", content)
 	}
-	if !strings.Contains(content, "SUPER,Q,spawn,kitty") {
+	if !strings.Contains(content, "SUPER,Q,spawn_shell,kitty") {
 		t.Fatalf("expected spawn keybind, got: %s", content)
 	}
-	if !strings.Contains(content, "exec-once = waybar") {
-		t.Fatalf("expected exec-once, got: %s", content)
+	if !strings.Contains(content, "exec_once = waybar") {
+		t.Fatalf("expected exec_once, got: %s", content)
 	}
 }
 

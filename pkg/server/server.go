@@ -67,6 +67,9 @@ func New(c ipc.Compositor, path string) *Server {
 	if idleMgr != nil {
 		idleMgr.SetIdleMonitorCallback(s.handleIdleMonitorChanged)
 	}
+	if s.isMango() {
+		s.cfgState.Seed(ipc.ConfigUniversal{})
+	}
 	s.initCache()
 	go s.watchEvents()
 	return s
@@ -125,6 +128,17 @@ func (s *Server) isNiri() bool {
 	return ok
 }
 
+func (s *Server) isMango() bool {
+	_, ok := s.compositor.(*mango.Mango)
+	return ok
+}
+
+func isCachedAppearanceKey(key string) bool {
+	var appearance ipc.ConfigAppearance
+	_, ok := ipc.GetAppearanceKey(&appearance, key)
+	return ok
+}
+
 // mergeKeybindsPayload applies a batch keybinds payload to the cached
 // config state without touching the compositor, so partial updates keep
 // the state keymon syncs from in step with runtime changes.
@@ -137,11 +151,9 @@ func (s *Server) mergeKeybindsPayload(jsonPayload string) error {
 	return err
 }
 
-// applyNiriConfig mutates the cached config state through mutate and
-// regenerates the single generated niri config file from the result.
-// niri has no runtime keyword API, so partial updates rewrite the whole
-// generated file and reload it.
-func (s *Server) applyNiriConfig(mutate func(state *ConfigState) (ipc.ConfigUniversal, error)) error {
+// applyGeneratedConfig regenerates the compositor-specific generated config
+// from the cached universal payload and reloads the active compositor.
+func (s *Server) applyGeneratedConfig(mutate func(state *ConfigState) (ipc.ConfigUniversal, error)) error {
 	payload, err := mutate(s.cfgState)
 	if err != nil {
 		return err
@@ -752,7 +764,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 				resp.Error = fmt.Sprintf("invalid params: %v", err)
 				break
 			}
-			if s.isNiri() {
+			if s.isNiri() || (s.isMango() && isCachedAppearanceKey(p.Key)) {
 				result, err = s.cfgState.GetKey(p.Key)
 			} else {
 				result, err = s.compositor.GetConfig(p.Key)
@@ -766,8 +778,8 @@ func (s *Server) handleConnection(conn net.Conn) {
 				resp.Error = fmt.Sprintf("invalid params: %v", err)
 				break
 			}
-			if s.isNiri() {
-				err = s.applyNiriConfig(func(st *ConfigState) (ipc.ConfigUniversal, error) {
+			if s.isNiri() || (s.isMango() && isCachedAppearanceKey(p.Key)) {
+				err = s.applyGeneratedConfig(func(st *ConfigState) (ipc.ConfigUniversal, error) {
 					return st.SetKey(p.Key, p.Value)
 				})
 			} else {
@@ -805,9 +817,27 @@ func (s *Server) handleConnection(conn net.Conn) {
 				break
 			}
 			if s.isNiri() {
-				err = s.applyNiriConfig(func(st *ConfigState) (ipc.ConfigUniversal, error) {
+				err = s.applyGeneratedConfig(func(st *ConfigState) (ipc.ConfigUniversal, error) {
 					return st.SetKeys(p.Configs)
 				})
+			} else if s.isMango() {
+				stateConfigs := make(map[string]interface{})
+				runtimeConfigs := make(map[string]interface{})
+				for key, value := range p.Configs {
+					if isCachedAppearanceKey(key) {
+						stateConfigs[key] = value
+					} else {
+						runtimeConfigs[key] = value
+					}
+				}
+				if len(stateConfigs) > 0 {
+					err = s.applyGeneratedConfig(func(st *ConfigState) (ipc.ConfigUniversal, error) {
+						return st.SetKeys(stateConfigs)
+					})
+				}
+				if err == nil && len(runtimeConfigs) > 0 {
+					err = s.compositor.BatchConfig(runtimeConfigs)
+				}
 			} else {
 				err = s.compositor.BatchConfig(p.Configs)
 			}
@@ -819,13 +849,13 @@ func (s *Server) handleConnection(conn net.Conn) {
 				resp.Error = fmt.Sprintf("invalid params: %v", err)
 				break
 			}
-			if s.isNiri() {
+			if s.isNiri() || s.isMango() {
 				var kbPayload ipc.BatchKeybindsPayload
 				if uerr := json.Unmarshal([]byte(p.Payload), &kbPayload); uerr != nil {
 					resp.Error = fmt.Sprintf("invalid keybinds payload: %v", uerr)
 					break
 				}
-				err = s.applyNiriConfig(func(st *ConfigState) (ipc.ConfigUniversal, error) {
+				err = s.applyGeneratedConfig(func(st *ConfigState) (ipc.ConfigUniversal, error) {
 					return st.ApplyKeybinds(kbPayload)
 				})
 			} else {
@@ -857,6 +887,16 @@ func (s *Server) handleConnection(conn net.Conn) {
 				resp.Error = fmt.Sprintf("invalid params: %v", err)
 				break
 			}
+			if s.isMango() {
+				bind := ipc.Keybind{
+					Enabled: true, Modifiers: strings.Fields(p.Mods), Key: p.Key,
+					Dispatcher: "exec", Argument: p.Command,
+				}
+				err = s.applyGeneratedConfig(func(st *ConfigState) (ipc.ConfigUniversal, error) {
+					return st.ApplyKeybinds(ipc.BatchKeybindsPayload{Binds: []ipc.Keybind{bind}})
+				})
+				break
+			}
 			if ipc.ModifierSelfGroupFromParts(strings.Fields(p.Mods), p.Key) != "" {
 				bind := ipc.Keybind{
 					Enabled:    true,
@@ -885,6 +925,14 @@ func (s *Server) handleConnection(conn net.Conn) {
 			}
 			if err := json.Unmarshal(req.Params, &p); err != nil {
 				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
+			if s.isMango() {
+				err = s.applyGeneratedConfig(func(st *ConfigState) (ipc.ConfigUniversal, error) {
+					return st.ApplyKeybinds(ipc.BatchKeybindsPayload{
+						Unbinds: []ipc.KeybindTarget{{Modifiers: strings.Fields(p.Mods), Key: p.Key}},
+					})
+				})
 				break
 			}
 			if ipc.ModifierSelfGroupFromParts(strings.Fields(p.Mods), p.Key) != "" {
@@ -1247,6 +1295,20 @@ func (s *Server) handleConnection(conn net.Conn) {
 			matches, e := s.idleMgr.AppInhibitorCheck(p.Patterns)
 			err = e
 			if err == nil {
+				if s.isMango() {
+					patterns := p.Patterns
+					if len(patterns) == 0 {
+						patterns = []string{"vlc", "mpv", "firefox", "chromium", "chrome", "brave", "vivaldi", "steam"}
+					}
+					for _, window := range s.cache.GetWindows() {
+						for _, pattern := range patterns {
+							if strings.Contains(strings.ToLower(window.AppID), strings.ToLower(pattern)) {
+								matches[window.AppID] = true
+								break
+							}
+						}
+					}
+				}
 				result = matches
 			}
 
