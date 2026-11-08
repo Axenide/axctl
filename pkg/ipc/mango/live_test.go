@@ -200,7 +200,7 @@ func TestMangoLiveReversibleDispatches(t *testing.T) {
 	activeTags, _ := monitors[0].Metadata["active_tags"].([]int)
 	for _, tag := range activeTags {
 		if tag == 0 {
-			t.Skip("tag 0 is currently reported active; overview and special-tag state are indistinguishable")
+			t.Skip("Mango overview is already open; skipping to avoid toggling it closed")
 		}
 	}
 	if len(activeTags) == 0 {
@@ -228,6 +228,9 @@ func TestMangoLiveReversibleDispatches(t *testing.T) {
 		}
 		t.Fatalf("toggleoverview did not expose Mango's overview tag marker: %v", openedTags)
 	}
+	if monitors[0].Metadata["overview_open"] != true {
+		t.Fatalf("overview_open = %v, want true", monitors[0].Metadata["overview_open"])
+	}
 	if err := m.ToggleOverview(); err != nil {
 		t.Fatalf("leave overview: %v", err)
 	}
@@ -239,6 +242,9 @@ func TestMangoLiveReversibleDispatches(t *testing.T) {
 	closedTags, _ := monitors[0].Metadata["active_tags"].([]int)
 	if containsTag(closedTags, 0) {
 		t.Fatalf("overview remained active after second toggle: %v", closedTags)
+	}
+	if monitors[0].Metadata["overview_open"] != false {
+		t.Fatalf("overview_open = %v after closing overview, want false", monitors[0].Metadata["overview_open"])
 	}
 	if !reflect.DeepEqual(activeTags, closedTags) {
 		t.Fatalf("active tags after toggling overview twice = %v, want %v", closedTags, activeTags)

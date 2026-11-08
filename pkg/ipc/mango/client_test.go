@@ -340,6 +340,40 @@ func TestWorkspaceIDsAndSpecialTag(t *testing.T) {
 	}
 }
 
+func TestOverviewTagIsReportedSeparatelyFromWorkspaceState(t *testing.T) {
+	s := newFakeServer(t, func(_ *testing.T, parts []string) (string, bool, bool, string) {
+		switch strings.Join(parts, " ") {
+		case "get all-tags":
+			return `{"all_tags":[{"monitor":"DP-1","tags":[{"index":1,"is_active":true,"is_urgent":false,"layout":"T","client_count":1},{"index":2,"is_active":false,"is_urgent":false,"layout":"G","client_count":0}]}]}`, false, true, ""
+		case "get layouts":
+			return `{"layouts":[{"symbol":"T","name":"tile"},{"symbol":"G","name":"grid"}]}`, false, true, ""
+		case "get all-monitors":
+			return `{"monitors":[{"name":"DP-1","active":true,"active_tags":[0]}]}`, false, true, ""
+		case "get all-clients":
+			return `{"clients":[]}`, false, true, ""
+		default:
+			return "", true, true, ""
+		}
+	})
+	m := s.Client(t)
+
+	monitors, err := m.ListMonitors()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := monitors[0].Metadata["overview_open"]; got != true {
+		t.Fatalf("overview_open = %v, want true", got)
+	}
+
+	workspaces, err := m.ListWorkspaces()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !workspaces[0].IsActive || workspaces[1].IsActive || workspaces[2].IsActive {
+		t.Fatalf("overview changed the underlying workspace state: %+v", workspaces)
+	}
+}
+
 func TestSilentCrossMonitorMoveIsUnsupported(t *testing.T) {
 	s := newFakeServer(t, func(_ *testing.T, parts []string) (string, bool, bool, string) {
 		if strings.Join(parts, " ") == "get all-monitors" {

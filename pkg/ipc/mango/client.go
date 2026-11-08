@@ -207,6 +207,15 @@ func workspaceID(monitor string, tag int) string {
 	return monitor + ":" + strconv.Itoa(tag)
 }
 
+func mangoOverviewOpen(activeTags []int) bool {
+	for _, tag := range activeTags {
+		if tag == 0 {
+			return true
+		}
+	}
+	return false
+}
+
 func (m *Mango) ActiveWindow() (string, error) {
 	var cur mangoClient
 	if err := m.query("get focusing-client", &cur); err != nil {
@@ -428,10 +437,14 @@ func (m *Mango) ListWorkspaces() ([]ipc.Workspace, error) {
 		return nil, err
 	}
 	activeTags := make(map[string]map[int]bool, len(monitors.Monitors))
+	overviewOpen := make(map[string]bool, len(monitors.Monitors))
 	for _, monitor := range monitors.Monitors {
 		activeTags[monitor.Name] = make(map[int]bool, len(monitor.ActiveTags))
+		overviewOpen[monitor.Name] = mangoOverviewOpen(monitor.ActiveTags)
 		for _, tag := range monitor.ActiveTags {
-			activeTags[monitor.Name][tag] = true
+			if tag > 0 {
+				activeTags[monitor.Name][tag] = true
+			}
 		}
 	}
 	specialCounts := make(map[string]int)
@@ -447,15 +460,12 @@ func (m *Mango) ListWorkspaces() ([]ipc.Workspace, error) {
 	out := make([]ipc.Workspace, 0)
 	for _, group := range response.Monitors {
 		active := activeTags[group.Monitor]
-		specialActive := active[0]
+		isOverviewOpen := overviewOpen[group.Monitor]
 		for i := range group.Tags {
 			t := &group.Tags[i]
 			isActive := t.Active.value()
-			if len(active) > 0 {
+			if len(active) > 0 && !isOverviewOpen {
 				isActive = active[t.Index]
-			}
-			if specialActive {
-				isActive = false
 			}
 			name := strconv.Itoa(t.Index)
 			layoutName := t.Layout
@@ -481,13 +491,12 @@ func (m *Mango) ListWorkspaces() ([]ipc.Workspace, error) {
 			ID:        workspaceID(group.Monitor, 0),
 			Name:      "0",
 			MonitorID: group.Monitor,
-			IsActive:  specialActive,
+			IsActive:  false,
 			IsEmpty:   true,
 			Metadata: map[string]interface{}{
-				"index":           0,
-				"special":         true,
-				"focused":         specialActive,
-				"tag_zero_active": specialActive,
+				"index":   0,
+				"special": true,
+				"focused": false,
 			},
 		})
 		out[len(out)-1].IsEmpty = specialCounts[group.Monitor] == 0
@@ -620,6 +629,7 @@ func (m *Mango) ListMonitors() ([]ipc.Monitor, error) {
 		if mm.Scale > 0 {
 			scale = mm.Scale
 		}
+		isOverviewOpen := mangoOverviewOpen(mm.ActiveTags)
 		out = append(out, ipc.Monitor{
 			ID:            mm.Name,
 			Name:          mm.Name,
@@ -636,6 +646,7 @@ func (m *Mango) ListMonitors() ([]ipc.Monitor, error) {
 				"active":        mm.Active.value(),
 				"layout_index":  mm.LayoutIndex,
 				"layout_symbol": mm.LayoutSymbol,
+				"overview_open": isOverviewOpen,
 				"active_tags":   append([]int(nil), mm.ActiveTags...),
 				"is_hdr":        mm.IsHDR.value(),
 				"is_vrr":        mm.IsVRR.value(),

@@ -314,9 +314,9 @@ Mango uses one Unix-socket connection per query or dispatch and one connection
 per event watch. Axctl follows that protocol directly; it does not invoke
 `mmsg` as a subprocess. Workspaces are Mango tags, including the special tag 0.
 Named special workspaces and silent moves to another monitor have no equivalent
-in Mango and return "feature not supported". Mango's IPC does not distinguish
-an active special tag 0 from overview in its active-tag status, so that
-workspace active-state detail is ambiguous.
+in Mango and return "feature not supported". The monitor's `active_tags: [0]`
+is Mango's native overview marker; the special tag's client visibility is
+reported separately from the active normal tagset.
 Mango can switch keyboard layouts to the next layout or to a numeric index;
 the IPC does not expose a reliable previous-layout action.
 Mango stores layouts per tag. Switch to a workspace and use `axctl layout set`
