@@ -34,7 +34,9 @@ type StartupConfig struct {
 }
 
 type GeneralConfig struct {
-	Layout string `toml:"layout,omitempty"`
+	Layout                  string            `toml:"layout,omitempty"`
+	WorkspaceLayoutsEnabled bool              `toml:"workspace_layouts_enabled,omitempty"`
+	WorkspaceLayouts        map[string]string `toml:"workspace_layouts,omitempty"`
 }
 
 // AppearanceConfig mirrors ipc.ConfigAppearance with TOML tags.
@@ -174,8 +176,17 @@ func (c *TOMLConfig) ToIPCConfig() ipc.ConfigUniversal {
 		cfg.Appearance = c.Appearance.toIPC()
 	}
 
-	if c.General != nil && c.General.Layout != "" {
-		cfg.Appearance.Layout = &c.General.Layout
+	if c.General != nil {
+		if c.General.Layout != "" {
+			cfg.Appearance.Layout = &c.General.Layout
+		}
+		if c.General.WorkspaceLayoutsEnabled || c.General.WorkspaceLayouts != nil {
+			cfg.Appearance.WorkspaceLayoutsEnabled = true
+			cfg.Appearance.WorkspaceLayouts = make(map[string]string, len(c.General.WorkspaceLayouts))
+			for key, layout := range c.General.WorkspaceLayouts {
+				cfg.Appearance.WorkspaceLayouts[key] = layout
+			}
+		}
 	}
 
 	if len(c.Keybinds) > 0 {

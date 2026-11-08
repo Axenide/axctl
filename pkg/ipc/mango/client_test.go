@@ -286,7 +286,9 @@ func TestWorkspaceIDsAndSpecialTag(t *testing.T) {
 	s := newFakeServer(t, func(_ *testing.T, parts []string) (string, bool, bool, string) {
 		switch strings.Join(parts, " ") {
 		case "get all-tags":
-			return `{"all_tags":[{"monitor":"DP-1","tags":[{"index":1,"is_active":true,"is_urgent":false,"layout":"tile","client_count":2},{"index":2,"is_active":false,"is_urgent":true,"layout":"grid","client_count":0}]}]}`, false, true, ""
+			return `{"all_tags":[{"monitor":"DP-1","tags":[{"index":1,"is_active":true,"is_urgent":false,"layout":"T","client_count":2},{"index":2,"is_active":false,"is_urgent":true,"layout":"G","client_count":0}]}]}`, false, true, ""
+		case "get layouts":
+			return `{"layouts":[{"symbol":"T","name":"tile"},{"symbol":"G","name":"grid"}]}`, false, true, ""
 		case "get all-monitors":
 			return `{"monitors":[{"name":"DP-1","active":true,"x":0,"y":0,"width":1920,"height":1080,"scale":1.25,"active_tags":[1],"layout_index":0}]}`, false, true, ""
 		default:
@@ -300,6 +302,9 @@ func TestWorkspaceIDsAndSpecialTag(t *testing.T) {
 	}
 	if len(workspaces) != 3 || workspaces[0].ID != "DP-1:1" || !workspaces[0].IsActive || workspaces[1].ID != "DP-1:2" || !workspaces[1].IsEmpty || workspaces[2].ID != "DP-1:0" {
 		t.Fatalf("workspaces = %+v", workspaces)
+	}
+	if workspaces[0].Metadata["layout"] != "tile" || workspaces[0].Metadata["layout_symbol"] != "T" || workspaces[1].Metadata["layout"] != "grid" {
+		t.Fatalf("workspace layouts = %+v / %+v", workspaces[0].Metadata, workspaces[1].Metadata)
 	}
 	active, err := m.ActiveWorkspace()
 	if err != nil || active.ID != "DP-1:1" {
@@ -417,7 +422,7 @@ func TestLayoutPropertyAndGroupNavigation(t *testing.T) {
 	s := newFakeServer(t, func(_ *testing.T, parts []string) (string, bool, bool, string) {
 		switch strings.Join(parts, " ") {
 		case "get client 8":
-			return `{"id":8,"monitor":"DP-1"}`, false, true, ""
+			return `{"id":8,"monitor":"DP-1","scroller_proportion":0.7}`, false, true, ""
 		case "get layouts":
 			return `{"layouts":[{"name":"tile"},{"name":"scroller"}]}`, false, true, ""
 		case "get all-monitors":
@@ -430,11 +435,16 @@ func TestLayoutPropertyAndGroupNavigation(t *testing.T) {
 	if err := m.SetLayoutProperty("8", "scroller_proportion", "0.75"); err != nil {
 		t.Fatal(err)
 	}
+	if err := m.SetLayoutProperty("8", "scroller_proportion", "+0.1"); err != nil {
+		t.Fatal(err)
+	}
 	if err := m.GroupNav("b"); err != nil {
 		t.Fatal(err)
 	}
 	requests := s.Requests()
-	if !containsString(requests, "dispatch set_proportion,0.75 client,8") || !containsString(requests, "dispatch groupfocus,prev") {
+	if !containsString(requests, "dispatch set_proportion,0.75 client,8") ||
+		!containsString(requests, "dispatch set_proportion,0.8 client,8") ||
+		!containsString(requests, "dispatch groupfocus,prev") {
 		t.Fatalf("requests = %v", requests)
 	}
 }

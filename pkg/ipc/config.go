@@ -52,13 +52,15 @@ type Animations struct {
 
 // ConfigAppearance holds universal configuration for UI and layout
 type ConfigAppearance struct {
-	Gaps       *Gaps       `json:"gaps,omitempty"`
-	Border     *Border     `json:"border,omitempty"`
-	Opacity    *Opacity    `json:"opacity,omitempty"`
-	Blur       *Blur       `json:"blur,omitempty"`
-	Shadow     *Shadow     `json:"shadow,omitempty"`
-	Animations *Animations `json:"animations,omitempty"`
-	Layout     *string     `json:"layout,omitempty"`
+	Gaps                    *Gaps             `json:"gaps,omitempty"`
+	Border                  *Border           `json:"border,omitempty"`
+	Opacity                 *Opacity          `json:"opacity,omitempty"`
+	Blur                    *Blur             `json:"blur,omitempty"`
+	Shadow                  *Shadow           `json:"shadow,omitempty"`
+	Animations              *Animations       `json:"animations,omitempty"`
+	Layout                  *string           `json:"layout,omitempty"`
+	WorkspaceLayoutsEnabled bool              `json:"workspace_layouts_enabled,omitempty"`
+	WorkspaceLayouts        map[string]string `json:"workspace_layouts,omitempty"`
 }
 
 // Keybind represents a single keyboard shortcut

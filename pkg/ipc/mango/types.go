@@ -83,6 +83,15 @@ type mangoTag struct {
 	ClientCount int       `json:"client_count"`
 }
 
+type mangoLayout struct {
+	Symbol string `json:"symbol"`
+	Name   string `json:"name"`
+}
+
+type mangoLayouts struct {
+	Layouts []mangoLayout `json:"layouts"`
+}
+
 type mangoTagsForMonitor struct {
 	Monitor string     `json:"monitor"`
 	Tags    []mangoTag `json:"tags"`

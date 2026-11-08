@@ -75,6 +75,55 @@ func TestGenerateAppearanceMapsWorkspaceAnimationDirection(t *testing.T) {
 	}
 }
 
+func TestGenerateAppearanceMapsPerWorkspaceLayouts(t *testing.T) {
+	out := (&Generator{}).GenerateAppearance(ipc.ConfigAppearance{
+		Layout: strPtr("scroller"),
+		WorkspaceLayouts: map[string]string{
+			"*":          "scroller",
+			"HDMI-A-1:2": "scroller",
+			"HDMI-A-1:1": "tile",
+		},
+	})
+	want := "tag_rule=id:*,layout_name:scroller\n" +
+		"tag_rule=id:1,monitor_name:HDMI-A-1,layout_name:tile\n" +
+		"tag_rule=id:2,monitor_name:HDMI-A-1,layout_name:scroller\n"
+	if !strings.Contains(out, want) {
+		t.Fatalf("per-workspace layout rules missing or unordered:\n%s", out)
+	}
+}
+
+func TestGenerateAppearanceWorkspaceLayoutsAvoidOtherCompositorFallback(t *testing.T) {
+	out := (&Generator{}).GenerateAppearance(ipc.ConfigAppearance{
+		Layout: strPtr("scrolling"),
+		WorkspaceLayouts: map[string]string{
+			"HDMI-A-1:1": "tile",
+		},
+	})
+	if strings.Contains(out, "tag_rule=id:*,layout_name:scrolling") {
+		t.Fatalf("non-Mango layout was applied as Mango's global tag layout:\n%s", out)
+	}
+	if !strings.Contains(out, "tag_rule=id:1,monitor_name:HDMI-A-1,layout_name:tile") {
+		t.Fatalf("workspace-specific tag rule missing:\n%s", out)
+	}
+}
+
+func TestGenerateAppearanceEmptyWorkspaceMapSuppressesGlobalFallback(t *testing.T) {
+	out := (&Generator{}).GenerateAppearance(ipc.ConfigAppearance{
+		Layout:                  strPtr("scrolling"),
+		WorkspaceLayoutsEnabled: true,
+	})
+	if strings.Contains(out, "tag_rule=") {
+		t.Fatalf("global fallback leaked into an explicitly empty Mango workspace map:\n%s", out)
+	}
+}
+
+func TestGenerateAppearanceSkipsUnknownGlobalLayout(t *testing.T) {
+	out := (&Generator{}).GenerateAppearance(ipc.ConfigAppearance{Layout: strPtr("scrolling")})
+	if strings.Contains(out, "tag_rule=id:*") {
+		t.Fatalf("unknown Mango layout was emitted as a global tag rule:\n%s", out)
+	}
+}
+
 func TestGenerateKeybindsMapsDispatchers(t *testing.T) {
 	g := &Generator{}
 	out := g.GenerateKeybinds(ipc.ConfigKeybinds{
@@ -127,6 +176,29 @@ func TestGenerateKeybindsMapsAmbxstDispatchers(t *testing.T) {
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing mapped Mango bind %q in:\n%s", want, out)
+		}
+	}
+}
+
+func TestGenerateKeybindsMapsScrollerResizeAndProportion(t *testing.T) {
+	out := (&Generator{}).GenerateKeybinds(ipc.ConfigKeybinds{
+		Custom: []ipc.Keybind{
+			{Modifiers: []string{"SUPER", "ALT"}, Key: "DOWN", Dispatcher: "resizeactive", Argument: "0 50", Enabled: true},
+			{Modifiers: []string{"SUPER", "SHIFT"}, Key: "SPACE", Dispatcher: "layoutmsg", Argument: "colresize +conf", Enabled: true},
+			{Modifiers: []string{"SUPER", "ALT"}, Key: "RIGHT", Dispatcher: "layoutmsg", Argument: "colresize +0.1", Enabled: true},
+			{Modifiers: []string{"SUPER", "ALT"}, Key: "LEFT", Dispatcher: "layoutmsg", Argument: "colresize -0.1", Enabled: true},
+			{Modifiers: []string{"SUPER"}, Key: "F1", Dispatcher: "layoutmsg", Argument: "colresize -conf", Enabled: true},
+		},
+	})
+	for _, want := range []string{
+		"SUPER+ALT,DOWN,resizewin,+0,+50",
+		"SUPER+SHIFT,SPACE,switch_proportion_preset",
+		"SUPER+ALT,RIGHT,spawn_shell,axctl window layout-prop scroller_proportion +0.1",
+		"SUPER+ALT,LEFT,spawn_shell,axctl window layout-prop scroller_proportion -0.1",
+		`dispatcher "layoutmsg" is not supported in Mango`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in generated binds:\n%s", want, out)
 		}
 	}
 }

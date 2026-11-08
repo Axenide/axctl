@@ -194,6 +194,18 @@ func mergeConfig(dst, src *TOMLConfig) {
 		if src.General.Layout != "" {
 			dst.General.Layout = src.General.Layout
 		}
+		if src.General.WorkspaceLayoutsEnabled {
+			dst.General.WorkspaceLayoutsEnabled = true
+		}
+		if src.General.WorkspaceLayouts != nil {
+			dst.General.WorkspaceLayoutsEnabled = true
+			if dst.General.WorkspaceLayouts == nil {
+				dst.General.WorkspaceLayouts = make(map[string]string)
+			}
+			for key, layout := range src.General.WorkspaceLayouts {
+				dst.General.WorkspaceLayouts[key] = layout
+			}
+		}
 	}
 
 	if src.Input != nil {

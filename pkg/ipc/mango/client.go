@@ -347,13 +347,6 @@ func (m *Mango) SetLayoutProperty(id string, key, value string) error {
 	if key != "proportion" && key != "scroller_proportion" {
 		return ipc.ErrNotSupported
 	}
-	proportion, err := strconv.ParseFloat(value, 64)
-	if err != nil {
-		return fmt.Errorf("invalid scroller proportion %q: %w", value, err)
-	}
-	if math.IsNaN(proportion) || math.IsInf(proportion, 0) || proportion < 0.1 || proportion > 1 {
-		return fmt.Errorf("scroller proportion %q must be between 0.1 and 1", value)
-	}
 	layouts, err := m.ListLayouts()
 	if err != nil {
 		return err
@@ -365,23 +358,49 @@ func (m *Mango) SetLayoutProperty(id string, key, value string) error {
 			break
 		}
 	}
-	if currentLayout != "scroller" {
+	if currentLayout != "scroller" && currentLayout != "vertical_scroller" {
 		return ipc.ErrNotSupported
 	}
-	if id != "" {
-		client, err := m.queryClientState(id)
+	clientID := id
+	if clientID == "" {
+		clientID, err = m.ActiveWindow()
 		if err != nil {
 			return err
 		}
-		monitor, err := m.selectedMonitor()
-		if err != nil {
-			return err
-		}
-		if client.Monitor != monitor {
-			return ipc.ErrNotSupported
+		if clientID == "" {
+			return fmt.Errorf("no active window for scroller proportion")
 		}
 	}
-	return m.dispatch("set_proportion", []string{value}, id)
+	client, err := m.queryClientState(clientID)
+	if err != nil {
+		return err
+	}
+	monitor, err := m.selectedMonitor()
+	if err != nil {
+		return err
+	}
+	if client.Monitor != monitor {
+		return ipc.ErrNotSupported
+	}
+	value = strings.TrimSpace(value)
+	proportion, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		return fmt.Errorf("invalid scroller proportion %q: %w", value, err)
+	}
+	if math.IsNaN(proportion) || math.IsInf(proportion, 0) {
+		return fmt.Errorf("invalid scroller proportion %q", value)
+	}
+	if strings.HasPrefix(value, "+") || strings.HasPrefix(value, "-") {
+		if client.ScrollerRatio < 0.1 || client.ScrollerRatio > 1 {
+			return fmt.Errorf("window %s has no valid scroller proportion", clientID)
+		}
+		proportion = math.Max(0.1, math.Min(1, client.ScrollerRatio+proportion))
+	} else if proportion < 0.1 || proportion > 1 {
+		return fmt.Errorf("scroller proportion %q must be between 0.1 and 1", value)
+	}
+	proportion = math.Round(proportion*10000) / 10000
+	value = strconv.FormatFloat(proportion, 'f', -1, 64)
+	return m.dispatch("set_proportion", []string{value}, clientID)
 }
 
 func (m *Mango) MoveWindowPixel(id string, x, y int) error {
@@ -392,6 +411,13 @@ func (m *Mango) ListWorkspaces() ([]ipc.Workspace, error) {
 	var response mangoAllTags
 	if err := m.query("get all-tags", &response); err != nil {
 		return nil, err
+	}
+	var layoutResponse mangoLayouts
+	layoutNames := make(map[string]string)
+	if err := m.query("get layouts", &layoutResponse); err == nil {
+		for _, layout := range layoutResponse.Layouts {
+			layoutNames[layout.Symbol] = layout.Name
+		}
 	}
 	var monitors mangoMonitors
 	if err := m.query("get all-monitors", &monitors); err != nil {
@@ -432,6 +458,10 @@ func (m *Mango) ListWorkspaces() ([]ipc.Workspace, error) {
 				isActive = false
 			}
 			name := strconv.Itoa(t.Index)
+			layoutName := t.Layout
+			if normalized, ok := layoutNames[t.Layout]; ok {
+				layoutName = normalized
+			}
 			out = append(out, ipc.Workspace{
 				ID:        workspaceID(group.Monitor, t.Index),
 				Name:      name,
@@ -439,10 +469,11 @@ func (m *Mango) ListWorkspaces() ([]ipc.Workspace, error) {
 				IsActive:  isActive,
 				IsEmpty:   t.ClientCount == 0,
 				Metadata: map[string]interface{}{
-					"index":   t.Index,
-					"urgent":  t.Urgent.value(),
-					"focused": isActive,
-					"layout":  t.Layout,
+					"index":         t.Index,
+					"urgent":        t.Urgent.value(),
+					"focused":       isActive,
+					"layout":        layoutName,
+					"layout_symbol": t.Layout,
 				},
 			})
 		}
@@ -674,24 +705,13 @@ var mangoKnownLayouts = []string{
 }
 
 func (m *Mango) ListLayouts() ([]ipc.Layout, error) {
-	var response struct {
-		Layouts []struct {
-			Symbol string `json:"symbol"`
-			Name   string `json:"name"`
-		} `json:"layouts"`
-	}
+	var response mangoLayouts
 	source := ipc.LayoutSourceDynamic
 	if err := m.query("get layouts", &response); err != nil {
 		source = ipc.LayoutSourceStatic
-		response.Layouts = make([]struct {
-			Symbol string `json:"symbol"`
-			Name   string `json:"name"`
-		}, 0, len(mangoKnownLayouts))
+		response.Layouts = make([]mangoLayout, 0, len(mangoKnownLayouts))
 		for _, name := range mangoKnownLayouts {
-			response.Layouts = append(response.Layouts, struct {
-				Symbol string `json:"symbol"`
-				Name   string `json:"name"`
-			}{Name: name})
+			response.Layouts = append(response.Layouts, mangoLayout{Name: name})
 		}
 	}
 	active := mangoActiveLayoutIndex(m)

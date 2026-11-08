@@ -319,6 +319,19 @@ an active special tag 0 from overview in its active-tag status, so that
 workspace active-state detail is ambiguous.
 Mango can switch keyboard layouts to the next layout or to a numeric index;
 the IPC does not expose a reliable previous-layout action.
+Mango stores layouts per tag. Switch to a workspace and use `axctl layout set`
+to change just that workspace's active layout; `workspace list` exposes each
+tag's normalized layout name in its metadata. Ambxst persists those selections
+and generates a default `tag_rule` followed by monitor-specific tag overrides.
+For standalone configs, Mango's native `tag_rule` entries can also set a
+different layout for each tag.
+
+The Mango keybind generator maps `layoutmsg colresize +conf` to Mango's native
+next-proportion preset action. Relative `colresize ±N` bindings call
+`axctl window layout-prop scroller_proportion ±N` through the daemon, so Mango
+must be able to find `axctl` in `PATH`. Mango's native preset dispatcher has no
+previous-preset action. In a horizontal `scroller`, `resizewin` on the X axis
+changes a window's width proportion, while the Y axis adjusts stack proportion.
 
 The generated Mango config uses the current `.conf` option names. Include the
 generated file from your Mango root config, for example:
@@ -338,7 +351,9 @@ AXCTL_MANGO_LIVE=1 go test ./pkg/ipc/mango -run '^TestMangoLive' -count=1
 ```
 
 They query the active session, validate a temporary generated config with
-`mango -p`, and toggle overview twice when the active-tag state is unambiguous.
+`mango -p`, toggle overview twice when its state is unambiguous, and change the
+layout on an empty tag temporarily to verify that another tag's layout is
+preserved before restoring the original workspace state.
 
 ## Development
 

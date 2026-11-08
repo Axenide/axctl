@@ -2,6 +2,8 @@ package mango
 
 import (
 	"fmt"
+	"math"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -49,82 +51,84 @@ func formatMangoModifiers(mods []string) string {
 }
 
 var mangoDispatchers = map[string]string{
-	"":                       "spawn_shell",
-	"exec":                   "spawn_shell",
-	"spawn":                  "spawn_shell",
-	"close":                  "killclient",
-	"killclient":             "killclient",
-	"fullscreen":             "togglefullscreen",
-	"togglefullscreen":       "togglefullscreen",
-	"maximize":               "togglemaximizescreen",
-	"togglemaximizescreen":   "togglemaximizescreen",
-	"togglefloating":         "togglefloating",
-	"toggle-floating":        "togglefloating",
-	"pin":                    "toggleglobal",
-	"toggleglobal":           "toggleglobal",
-	"toggle-pin":             "toggleglobal",
-	"move":                   "move_client",
-	"workspace":              "view",
-	"movetoworkspace":        "tag",
-	"movetoworkspacesilent":  "tagsilent",
-	"overview":               "toggleoverview",
-	"reload":                 "reload_config",
-	"reload_config":          "reload_config",
-	"quit":                   "quit",
-	"exit":                   "quit",
-	"focusdir-left":          "focusdir,left",
-	"focusdir-right":         "focusdir,right",
-	"focusdir-up":            "focusdir,up",
-	"focusdir-down":          "focusdir,down",
-	"move-left":              "move_client,left",
-	"move-right":             "move_client,right",
-	"move-up":                "move_client,up",
-	"move-down":              "move_client,down",
-	"smartmovewin-left":      "smartmovewin,left",
-	"smartmovewin-right":     "smartmovewin,right",
-	"smartmovewin-up":        "smartmovewin,up",
-	"smartmovewin-down":      "smartmovewin,down",
-	"center":                 "centerwin",
-	"centerwin":              "centerwin",
-	"toggle-scratchpad":      "toggle_scratchpad",
-	"toggle_scratchpad":      "toggle_scratchpad",
-	"switch-layout":          "switch_layout",
-	"switch_layout":          "switch_layout",
-	"setlayout":              "setlayout",
-	"incnmaster":             "incnmaster",
-	"setmfact":               "setmfact",
-	"zoom":                   "zoom",
-	"focusmon-left":          "focusmon,left",
-	"focusmon-right":         "focusmon,right",
-	"focusmon-up":            "focusmon,up",
-	"focusmon-down":          "focusmon,down",
-	"focusmon-next":          "focusmon,next",
-	"focusmon-prev":          "focusmon,prev",
-	"tagmon-left":            "tagmon,left",
-	"tagmon-right":           "tagmon,right",
-	"tagmon-up":              "tagmon,up",
-	"tagmon-down":            "tagmon,down",
-	"viewtoleft":             "viewtoleft",
-	"viewtoright":            "viewtoright",
-	"focusstack-next":        "focusstack,next",
-	"focusstack-prev":        "focusstack,prev",
-	"focusstack":             "focusstack,next",
-	"groupfocus-next":        "groupfocus,next",
-	"groupfocus-prev":        "groupfocus,prev",
-	"group-nav-next":         "groupfocus,next",
-	"group-nav-prev":         "groupfocus,prev",
-	"groupjoin-left":         "groupjoin,left",
-	"groupjoin-right":        "groupjoin,right",
-	"minimize":               "minimized",
-	"minimized":              "minimized",
-	"restore-minimized":      "restore_minimized",
-	"toggleoverview":         "toggleoverview",
-	"togglejump":             "togglejump",
-	"togglefakefullscreen":   "togglefakefullscreen",
-	"toggleoverlay":          "toggleoverlay",
-	"toggle-special":         "toggle_special_tag",
-	"toggle_special_tag":     "toggle_special_tag",
-	"switch-keyboard-layout": "switch_keyboard_layout",
+	"":                         "spawn_shell",
+	"exec":                     "spawn_shell",
+	"spawn":                    "spawn_shell",
+	"close":                    "killclient",
+	"killclient":               "killclient",
+	"fullscreen":               "togglefullscreen",
+	"togglefullscreen":         "togglefullscreen",
+	"maximize":                 "togglemaximizescreen",
+	"togglemaximizescreen":     "togglemaximizescreen",
+	"togglefloating":           "togglefloating",
+	"toggle-floating":          "togglefloating",
+	"pin":                      "toggleglobal",
+	"toggleglobal":             "toggleglobal",
+	"toggle-pin":               "toggleglobal",
+	"move":                     "move_client",
+	"workspace":                "view",
+	"movetoworkspace":          "tag",
+	"movetoworkspacesilent":    "tagsilent",
+	"overview":                 "toggleoverview",
+	"reload":                   "reload_config",
+	"reload_config":            "reload_config",
+	"quit":                     "quit",
+	"exit":                     "quit",
+	"focusdir-left":            "focusdir,left",
+	"focusdir-right":           "focusdir,right",
+	"focusdir-up":              "focusdir,up",
+	"focusdir-down":            "focusdir,down",
+	"move-left":                "move_client,left",
+	"move-right":               "move_client,right",
+	"move-up":                  "move_client,up",
+	"move-down":                "move_client,down",
+	"smartmovewin-left":        "smartmovewin,left",
+	"smartmovewin-right":       "smartmovewin,right",
+	"smartmovewin-up":          "smartmovewin,up",
+	"smartmovewin-down":        "smartmovewin,down",
+	"center":                   "centerwin",
+	"centerwin":                "centerwin",
+	"toggle-scratchpad":        "toggle_scratchpad",
+	"toggle_scratchpad":        "toggle_scratchpad",
+	"switch-layout":            "switch_layout",
+	"switch_layout":            "switch_layout",
+	"setlayout":                "setlayout",
+	"incnmaster":               "incnmaster",
+	"setmfact":                 "setmfact",
+	"zoom":                     "zoom",
+	"switch_proportion_preset": "switch_proportion_preset",
+	"switch-proportion-preset": "switch_proportion_preset",
+	"focusmon-left":            "focusmon,left",
+	"focusmon-right":           "focusmon,right",
+	"focusmon-up":              "focusmon,up",
+	"focusmon-down":            "focusmon,down",
+	"focusmon-next":            "focusmon,next",
+	"focusmon-prev":            "focusmon,prev",
+	"tagmon-left":              "tagmon,left",
+	"tagmon-right":             "tagmon,right",
+	"tagmon-up":                "tagmon,up",
+	"tagmon-down":              "tagmon,down",
+	"viewtoleft":               "viewtoleft",
+	"viewtoright":              "viewtoright",
+	"focusstack-next":          "focusstack,next",
+	"focusstack-prev":          "focusstack,prev",
+	"focusstack":               "focusstack,next",
+	"groupfocus-next":          "groupfocus,next",
+	"groupfocus-prev":          "groupfocus,prev",
+	"group-nav-next":           "groupfocus,next",
+	"group-nav-prev":           "groupfocus,prev",
+	"groupjoin-left":           "groupjoin,left",
+	"groupjoin-right":          "groupjoin,right",
+	"minimize":                 "minimized",
+	"minimized":                "minimized",
+	"restore-minimized":        "restore_minimized",
+	"toggleoverview":           "toggleoverview",
+	"togglejump":               "togglejump",
+	"togglefakefullscreen":     "togglefakefullscreen",
+	"toggleoverlay":            "toggleoverlay",
+	"toggle-special":           "toggle_special_tag",
+	"toggle_special_tag":       "toggle_special_tag",
+	"switch-keyboard-layout":   "switch_keyboard_layout",
 }
 
 func boolStr(b *bool) string {
@@ -262,10 +266,50 @@ func (g *Generator) GenerateAppearance(config ipc.ConfigAppearance) string {
 		}
 	}
 
-	if config.Layout != nil && *config.Layout != "" {
-		b.WriteString("tag_rule=id:*,layout_name:" + *config.Layout + "\n")
+	if !config.WorkspaceLayoutsEnabled && config.WorkspaceLayouts == nil {
+		if config.Layout != nil && mangoHasKnownLayout(*config.Layout) {
+			b.WriteString("tag_rule=id:*,layout_name:" + *config.Layout + "\n")
+		}
+	} else {
+		workspaceKeys := make([]string, 0, len(config.WorkspaceLayouts))
+		for key := range config.WorkspaceLayouts {
+			workspaceKeys = append(workspaceKeys, key)
+		}
+		sort.Strings(workspaceKeys)
+		for _, key := range workspaceKeys {
+			if rule, ok := mangoWorkspaceTagRule(key, config.WorkspaceLayouts[key]); ok {
+				b.WriteString(rule + "\n")
+			}
+		}
 	}
 	return b.String()
+}
+
+func mangoWorkspaceTagRule(workspaceID, layout string) (string, bool) {
+	if workspaceID == "*" {
+		if layout == "" || strings.ContainsAny(layout, ",\r\n") {
+			return "", false
+		}
+		return "tag_rule=id:*,layout_name:" + layout, true
+	}
+	monitor, rawTag, ok := strings.Cut(workspaceID, ":")
+	if !ok || monitor == "" || layout == "" || strings.ContainsAny(monitor+layout, ",\r\n") {
+		return "", false
+	}
+	tag, err := strconv.Atoi(rawTag)
+	if err != nil || tag < 1 || tag > 31 {
+		return "", false
+	}
+	return fmt.Sprintf("tag_rule=id:%d,monitor_name:%s,layout_name:%s", tag, monitor, layout), true
+}
+
+func mangoHasKnownLayout(name string) bool {
+	for _, layout := range mangoKnownLayouts {
+		if name == layout {
+			return true
+		}
+	}
+	return false
 }
 
 func mangoTagAnimationDirection(workspaceStyle string) (int, bool) {
@@ -450,6 +494,31 @@ func mangoMapLayoutMessage(message string) (string, string, bool) {
 			return "", "", false
 		}
 		return "tag", parts[1], true
+	case "colresize":
+		if len(parts) != 2 {
+			return "", "", false
+		}
+		change := strings.ToLower(parts[1])
+		if change == "+conf" {
+			return "switch_proportion_preset", "", true
+		}
+		if change == "-conf" {
+			return "", "", false
+		}
+		proportion, err := strconv.ParseFloat(change, 64)
+		if err != nil || math.IsNaN(proportion) || math.IsInf(proportion, 0) {
+			return "", "", false
+		}
+		if strings.HasPrefix(change, "+") || strings.HasPrefix(change, "-") {
+			if math.Abs(proportion) > 0.9 || proportion == 0 {
+				return "", "", false
+			}
+			return "spawn_shell", "axctl window layout-prop scroller_proportion " + change, true
+		}
+		if proportion < 0.1 || proportion > 1 {
+			return "", "", false
+		}
+		return "set_proportion", strconv.FormatFloat(proportion, 'f', -1, 64), true
 	default:
 		return "", "", false
 	}
@@ -466,7 +535,7 @@ func mangoMapDispatcher(dispatcher string) (string, bool) {
 		"switch_keyboard_layout", "setlayout", "switch_layout", "togglefloating",
 		"togglefullscreen", "togglefakefullscreen", "toggleoverlay", "minimized",
 		"restore_minimized", "toggle_scratchpad", "toggle_special_tag", "toggleoverview",
-		"togglejump", "toggleglobal", "togglemaximizescreen", "view", "tag",
+		"togglejump", "toggleglobal", "togglemaximizescreen", "switch_proportion_preset", "view", "tag",
 		"tagsilent", "viewcrossmon", "tagcrossmon", "toggletag", "toggleview",
 		"spawn", "spawn_shell", "quit", "resizewin", "movewin", "smartmovewin",
 		"move_client", "exchange_client", "set_proportion", "focusmon", "tagmon",

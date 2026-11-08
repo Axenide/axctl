@@ -33,8 +33,12 @@ func TestMangoLiveReadOnly(t *testing.T) {
 	if err != nil || len(workspaces) == 0 {
 		t.Fatalf("ListWorkspaces: got %d entries, error %v", len(workspaces), err)
 	}
-	if _, err := m.ActiveWorkspace(); err != nil {
+	activeWorkspace, err := m.ActiveWorkspace()
+	if err != nil {
 		t.Fatalf("ActiveWorkspace: %v", err)
+	}
+	if layout, ok := activeWorkspace.Metadata["layout"].(string); !ok || layout == "" {
+		t.Fatalf("active Mango workspace did not expose a normalized layout name: %+v", activeWorkspace)
 	}
 	monitors, err := m.ListMonitors()
 	if err != nil || len(monitors) == 0 {
@@ -76,6 +80,10 @@ func TestMangoLiveGeneratedConfigParses(t *testing.T) {
 			Blur:       &ipc.Blur{Enabled: liveBool(true), Size: liveInt(5), Passes: liveInt(2)},
 			Shadow:     &ipc.Shadow{Enabled: liveBool(true), Size: liveInt(12), Color: liveString("#000000aa")},
 			Animations: &ipc.Animations{Enabled: liveBool(true), WorkspaceStyle: liveString("slidefadevert 20%")},
+			WorkspaceLayouts: map[string]string{
+				"HDMI-A-1:1": "scroller",
+				"HDMI-A-1:2": "tile",
+			},
 		},
 		Keybinds: ipc.ConfigKeybinds{Custom: []ipc.Keybind{
 			{Modifiers: []string{"SUPER"}, Key: "Q", Dispatcher: "exec", Argument: "true", Enabled: true},
@@ -86,6 +94,9 @@ func TestMangoLiveGeneratedConfigParses(t *testing.T) {
 			{Modifiers: []string{"SUPER"}, Key: "Up", Dispatcher: "movefocus", Argument: "u", Enabled: true},
 			{Modifiers: []string{"SUPER", "SHIFT"}, Key: "Left", Dispatcher: "movewindow", Argument: "l", Enabled: true},
 			{Modifiers: []string{"SUPER", "ALT"}, Key: "Down", Dispatcher: "resizeactive", Argument: "0 50", Enabled: true},
+			{Modifiers: []string{"SUPER", "SHIFT"}, Key: "SPACE", Dispatcher: "layoutmsg", Argument: "colresize +conf", Enabled: true},
+			{Modifiers: []string{"SUPER", "ALT"}, Key: "Right", Dispatcher: "layoutmsg", Argument: "colresize +0.1", Enabled: true},
+			{Modifiers: []string{"SUPER", "ALT"}, Key: "Left", Dispatcher: "layoutmsg", Argument: "colresize -0.1", Enabled: true},
 			{Modifiers: []string{"SUPER", "ALT", "CTRL"}, Key: "Left", Dispatcher: "layoutmsg", Argument: "swapcol l", Enabled: true},
 			{Modifiers: []string{"SUPER", "SHIFT"}, Key: "V", Dispatcher: "togglespecialworkspace", Enabled: true},
 			{Modifiers: []string{"SUPER"}, Key: "mouse_down", Dispatcher: "workspace", Argument: "e-1", Enabled: true},
@@ -159,6 +170,28 @@ func TestMangoLiveReversibleDispatches(t *testing.T) {
 		}
 		break
 	}
+	if activeID != "" {
+		activeWorkspace, err := m.ActiveWorkspace()
+		if err != nil {
+			t.Fatal(err)
+		}
+		originalLayout, _ := activeWorkspace.Metadata["layout"].(string)
+		if originalLayout != "scroller" {
+			if err := m.SetLayout("scroller"); err != nil {
+				t.Fatalf("temporarily select scroller layout: %v", err)
+			}
+			defer func() {
+				if err := m.SetLayout(originalLayout); err != nil {
+					t.Errorf("restore original Mango layout %q: %v", originalLayout, err)
+				}
+			}()
+		}
+		for _, change := range []string{"+0.1", "-0.1"} {
+			if err := m.SetLayoutProperty(activeID, "scroller_proportion", change); err != nil {
+				t.Fatalf("adjust scroller proportion by %s: %v", change, err)
+			}
+		}
+	}
 
 	monitors, err := m.ListMonitors()
 	if err != nil || len(monitors) == 0 {
@@ -211,6 +244,105 @@ func TestMangoLiveReversibleDispatches(t *testing.T) {
 		t.Fatalf("active tags after toggling overview twice = %v, want %v", closedTags, activeTags)
 	}
 	toggled = false
+}
+
+func TestMangoLiveLayoutsAreStoredPerTag(t *testing.T) {
+	if os.Getenv("AXCTL_MANGO_LIVE") != "1" {
+		t.Skip("set AXCTL_MANGO_LIVE=1 to test Mango per-tag layout state")
+	}
+	m, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+
+	originalWorkspace, err := m.ActiveWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalWindow, err := m.ActiveWindow()
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspaces, err := m.ListWorkspaces()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var target *ipc.Workspace
+	for i := range workspaces {
+		workspace := &workspaces[i]
+		if workspace.MonitorID != originalWorkspace.MonitorID || workspace.ID == originalWorkspace.ID || !workspace.IsEmpty {
+			continue
+		}
+		if workspace.Metadata["special"] == true {
+			continue
+		}
+		target = workspace
+		break
+	}
+	if target == nil {
+		t.Skip("no empty non-special tag is available for an isolated per-tag layout check")
+	}
+	targetLayout, _ := target.Metadata["layout"].(string)
+	if targetLayout == "" {
+		t.Skip("Mango did not report a named layout for the target tag")
+	}
+	newLayout := "scroller"
+	if targetLayout == newLayout {
+		newLayout = "tile"
+	}
+	changedTagLayout := false
+	switchedWorkspace := false
+	defer func() {
+		if changedTagLayout {
+			if m.SwitchWorkspace(target.ID) == nil {
+				_ = m.SetLayout(targetLayout)
+			}
+		}
+		if switchedWorkspace {
+			_ = m.SwitchWorkspace(originalWorkspace.ID)
+			if originalWindow != "" {
+				_ = m.FocusWindow(originalWindow)
+			}
+		}
+	}()
+	if err := m.SwitchWorkspace(target.ID); err != nil {
+		t.Fatalf("switch to target tag: %v", err)
+	}
+	switchedWorkspace = true
+	if err := m.SetLayout(newLayout); err != nil {
+		t.Fatalf("set target tag layout: %v", err)
+	}
+	changedTagLayout = true
+	workspaces, err = m.ListWorkspaces()
+	if err != nil {
+		t.Fatal(err)
+	}
+	layouts := make(map[string]string, len(workspaces))
+	for _, workspace := range workspaces {
+		if name, ok := workspace.Metadata["layout"].(string); ok {
+			layouts[workspace.ID] = name
+		}
+	}
+	if layouts[target.ID] != newLayout {
+		t.Fatalf("target tag layout = %q, want %q", layouts[target.ID], newLayout)
+	}
+	if layouts[originalWorkspace.ID] != originalWorkspace.Metadata["layout"] {
+		t.Fatalf("changing %s changed active tag %s layout: %+v", target.ID, originalWorkspace.ID, layouts)
+	}
+	if err := m.SetLayout(targetLayout); err != nil {
+		t.Fatalf("restore target tag layout: %v", err)
+	}
+	changedTagLayout = false
+	if err := m.SwitchWorkspace(originalWorkspace.ID); err != nil {
+		t.Fatalf("restore original workspace: %v", err)
+	}
+	switchedWorkspace = false
+	if originalWindow != "" {
+		if err := m.FocusWindow(originalWindow); err != nil {
+			t.Fatalf("restore original focused window: %v", err)
+		}
+	}
 }
 
 func liveBool(value bool) *bool        { return &value }
