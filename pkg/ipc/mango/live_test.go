@@ -75,7 +75,7 @@ func TestMangoLiveGeneratedConfigParses(t *testing.T) {
 			Opacity:    &ipc.Opacity{Active: liveFloat(1), Inactive: liveFloat(0.9)},
 			Blur:       &ipc.Blur{Enabled: liveBool(true), Size: liveInt(5), Passes: liveInt(2)},
 			Shadow:     &ipc.Shadow{Enabled: liveBool(true), Size: liveInt(12), Color: liveString("#000000aa")},
-			Animations: &ipc.Animations{Enabled: liveBool(true)},
+			Animations: &ipc.Animations{Enabled: liveBool(true), WorkspaceStyle: liveString("slidefadevert 20%")},
 		},
 		Keybinds: ipc.ConfigKeybinds{Custom: []ipc.Keybind{
 			{Modifiers: []string{"SUPER"}, Key: "Q", Dispatcher: "exec", Argument: "true", Enabled: true},

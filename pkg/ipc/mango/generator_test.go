@@ -58,6 +58,23 @@ func TestGenerateAppearanceBlurAndShadow(t *testing.T) {
 	}
 }
 
+func TestGenerateAppearanceMapsWorkspaceAnimationDirection(t *testing.T) {
+	for _, test := range []struct {
+		style string
+		want  string
+	}{
+		{style: "slidefade 20%", want: "tag_animation_direction = 1"},
+		{style: "slidefadevert 20%", want: "tag_animation_direction = 0"},
+	} {
+		out := (&Generator{}).GenerateAppearance(ipc.ConfigAppearance{
+			Animations: &ipc.Animations{Enabled: boolPtr(true), WorkspaceStyle: strPtr(test.style)},
+		})
+		if !strings.Contains(out, test.want) {
+			t.Errorf("workspace style %q should generate %q, got:\n%s", test.style, test.want, out)
+		}
+	}
+}
+
 func TestGenerateKeybindsMapsDispatchers(t *testing.T) {
 	g := &Generator{}
 	out := g.GenerateKeybinds(ipc.ConfigKeybinds{

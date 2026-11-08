@@ -251,14 +251,36 @@ func (g *Generator) GenerateAppearance(config ipc.ConfigAppearance) string {
 		}
 	}
 
-	if config.Animations != nil && config.Animations.Enabled != nil {
-		b.WriteString(fmt.Sprintf("animations = %s\n", boolStr(config.Animations.Enabled)))
+	if config.Animations != nil {
+		if config.Animations.Enabled != nil {
+			b.WriteString(fmt.Sprintf("animations = %s\n", boolStr(config.Animations.Enabled)))
+		}
+		if config.Animations.WorkspaceStyle != nil {
+			if direction, ok := mangoTagAnimationDirection(*config.Animations.WorkspaceStyle); ok {
+				b.WriteString(fmt.Sprintf("tag_animation_direction = %d\n", direction))
+			}
+		}
 	}
 
 	if config.Layout != nil && *config.Layout != "" {
 		b.WriteString("tag_rule=id:*,layout_name:" + *config.Layout + "\n")
 	}
 	return b.String()
+}
+
+func mangoTagAnimationDirection(workspaceStyle string) (int, bool) {
+	fields := strings.Fields(strings.ToLower(strings.TrimSpace(workspaceStyle)))
+	if len(fields) == 0 {
+		return 0, false
+	}
+	switch fields[0] {
+	case "slidefade":
+		return 1, true
+	case "slidefadevert":
+		return 0, true
+	default:
+		return 0, false
+	}
 }
 
 func (g *Generator) GenerateKeybinds(config ipc.ConfigKeybinds) string {

@@ -43,12 +43,10 @@ type Shadow struct {
 // Animations config
 type Animations struct {
 	Enabled *bool `json:"enabled,omitempty"`
-	// WorkspaceStyle overrides the default 'slidefade 20%' used for
-	// the workspaces animation in the generated hyprland.{lua,conf}.
-	// Shell code (e.g. ambxst) computes this from the bar orientation:
-	// horizontal bar → vertical slide ('slidefadevert 20%'), vertical
-	// bar → horizontal slide ('slidefade 20%'). When nil, axctl uses
-	// 'slidefade 20%' to preserve prior behaviour.
+	// WorkspaceStyle carries the shell's bar-oriented workspace slide style.
+	// Hyprland uses it directly; Mango maps slidefade/slidefadevert to its
+	// horizontal/vertical tag animation direction. When nil, axctl uses the
+	// default slidefade style where supported.
 	WorkspaceStyle *string `json:"workspaceStyle,omitempty"`
 }
 
