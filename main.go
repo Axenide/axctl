@@ -55,7 +55,7 @@ func main() {
 		runDaemon(customConfigPath)
 	case "subscribe":
 		runSubscribe()
-	case "window", "workspace", "monitor", "layout", "config", "system", "darkmode", "brightness", "overview":
+	case "window", "workspace", "monitor", "layout", "config", "system", "darkmode", "brightness", "overview", "application", "icon", "notification":
 		if len(remainingArgs) < 2 {
 			usage()
 			return
@@ -112,6 +112,16 @@ func usage() {
 	fmt.Println("    toggle-special [name]   Toggle special workspace")
 	fmt.Println("\n  overview <action>")
 	fmt.Println("    toggle                  Toggle the compositor overview (Niri/Mango)")
+	fmt.Println("\n  application <action>")
+	fmt.Println("    list                    List visible desktop applications")
+	fmt.Println("    search <query>          Search desktop applications")
+	fmt.Println("    get <id>                Get a desktop application")
+	fmt.Println("    launch <id> [action]    Launch an application or desktop action")
+	fmt.Println("\n  icon resolve <name> [size]")
+	fmt.Println("\n  notification <action> [id]")
+	fmt.Println("    list                    List notification history")
+	fmt.Println("    active                  List active notifications")
+	fmt.Println("    dismiss <id>            Dismiss an active notification")
 	fmt.Println("\n  monitor <action> [args]")
 	fmt.Println("    list                    List all monitors")
 	fmt.Println("    focus <id>              Focus monitor")
@@ -245,36 +255,20 @@ func findLatestSocket(pattern string) string {
 
 func runDaemon(customConfigPath string) {
 	var comp ipc.Compositor
-	var err error
-
+	var detectErr error
 	if mango.SessionDetected() {
-		comp, err = mango.New()
-		if err != nil {
-			fmt.Printf("Error: Mango was detected but its IPC socket is unavailable: %v\n", err)
-			os.Exit(1)
-		}
-		fmt.Println("Detected compositor:", comp)
-	} else {
-		comp, err = hyprland.New()
-		if err == nil {
-			fmt.Println("Detected compositor:", comp)
-		} else {
-			comp, err = niri.New()
-			if err == nil {
-				fmt.Println("Detected compositor:", comp)
-			} else {
-				comp, err = mango.New()
-				if err == nil {
-					fmt.Println("Detected compositor:", comp)
-				} else {
-					fmt.Println("Error: no supported compositor detected")
-					os.Exit(1)
-				}
-			}
+		comp, detectErr = mango.New()
+	} else if comp, detectErr = hyprland.New(); detectErr != nil {
+		if comp, detectErr = niri.New(); detectErr != nil {
+			comp, detectErr = mango.New()
 		}
 	}
-
-	fmt.Printf("Detected compositor: %T\n", comp)
+	if detectErr == nil {
+		fmt.Printf("Detected compositor: %T\n", comp)
+	} else {
+		comp = nil
+		fmt.Printf("No supported compositor detected; starting application and icon services only: %v\n", detectErr)
+	}
 	fmt.Println("Creating server...")
 
 	socketPath := defaultSocketPath()
@@ -290,6 +284,7 @@ func runDaemon(customConfigPath string) {
 	}
 
 	srv := server.New(comp, socketPath)
+	srv.StartServices()
 
 	fmt.Printf("Starting axctl daemon on %s\n", socketPath)
 
@@ -299,7 +294,7 @@ func runDaemon(customConfigPath string) {
 	if configPath == "" {
 		configPath = config.DefaultConfigPath()
 	}
-	if _, statErr := os.Stat(configPath); statErr == nil {
+	if _, statErr := os.Stat(configPath); statErr == nil && comp != nil {
 		cfg, cfgErr := config.LoadConfig(configPath)
 		if cfgErr != nil {
 			fmt.Printf("[axctl-config] Error loading config: %v\n", cfgErr)
@@ -329,8 +324,10 @@ func runDaemon(customConfigPath string) {
 			})
 			cfgWatcher = watcher
 		}
-	} else {
+	} else if comp != nil {
 		fmt.Printf("[axctl-config] No config file at %s, skipping\n", configPath)
+	} else {
+		fmt.Println("[axctl-config] Skipping compositor configuration without a supported compositor")
 	}
 
 	sig := make(chan os.Signal, 1)
@@ -344,6 +341,7 @@ func runDaemon(customConfigPath string) {
 	}()
 
 	<-sig
+	srv.Close()
 	if cfgWatcher != nil {
 		cfgWatcher.Stop()
 	}
@@ -727,6 +725,42 @@ func handleRPC(category string, args []string) {
 	case "Brightness.Restore":
 		if len(args) > 1 {
 			params["monitor"] = args[1]
+		}
+	case "Application.Search":
+		if len(args) > 1 {
+			params["query"] = strings.Join(args[1:], " ")
+		}
+	case "Application.Get":
+		if len(args) > 1 {
+			params["id"] = args[1]
+		}
+	case "Application.Launch":
+		if len(args) > 1 {
+			params["id"] = args[1]
+		}
+		if len(args) > 2 {
+			params["actionId"] = args[2]
+		}
+	case "Icon.Resolve":
+		if len(args) > 1 {
+			params["name"] = args[1]
+		}
+		if len(args) > 2 {
+			var size int
+			if _, scanErr := fmt.Sscanf(args[2], "%d", &size); scanErr != nil {
+				fmt.Printf("Error: invalid icon size %q\n", args[2])
+				return
+			}
+			params["size"] = size
+		}
+	case "Notification.Dismiss", "Notification.Close", "Notification.Delete":
+		if len(args) > 1 {
+			var id uint32
+			if _, scanErr := fmt.Sscanf(args[1], "%d", &id); scanErr != nil {
+				fmt.Printf("Error: invalid notification ID %q\n", args[1])
+				return
+			}
+			params["id"] = id
 		}
 	}
 

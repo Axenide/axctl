@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -8,25 +9,36 @@ import (
 	"strings"
 	"sync"
 
+	"axctl/pkg/applications"
+	"axctl/pkg/icons"
 	"axctl/pkg/ipc"
 	"axctl/pkg/ipc/hyprland"
 	"axctl/pkg/ipc/mango"
 	"axctl/pkg/ipc/niri"
 	"axctl/pkg/keymon"
+	"axctl/pkg/notifications"
+	"axctl/pkg/tray"
 )
 
 type Server struct {
-	compositor ipc.Compositor
-	socketPath string
-	cache      *ipc.StateCache
-	cfgState   *ConfigState
-	keyMon     *keymon.Monitor
-	clients    map[net.Conn]*eventClient
-	clientsMu  sync.RWMutex
-	idleMgr    *IdleManager
+	compositor    ipc.Compositor
+	socketPath    string
+	cache         *ipc.StateCache
+	cfgState      *ConfigState
+	apps          *applications.Catalog
+	iconResolver  *icons.Resolver
+	notifications *notifications.Service
+	tray          *tray.Service
+	keyMon        *keymon.Monitor
+	clients       map[net.Conn]*eventClient
+	clientsMu     sync.RWMutex
+	idleMgr       *IdleManager
 
 	mu           sync.RWMutex
 	overviewOpen *bool
+	servicesCtx  context.Context
+	servicesStop context.CancelFunc
+	appRevision  uint64
 }
 
 // eventClient is a subscribed connection with its own serialized outbound
@@ -40,6 +52,20 @@ type eventClient struct {
 }
 
 const eventClientQueueSize = 256
+
+func requiresCompositor(method string) bool {
+	for _, prefix := range []string{"Window.", "Workspace.", "Monitor.", "Layout.", "Config.", "Overview."} {
+		if strings.HasPrefix(method, prefix) {
+			return true
+		}
+	}
+	switch method {
+	case "System.Execute", "System.GetCursorPosition", "System.GetCapabilities", "System.GetCompositor", "System.Exit", "System.SwitchKeyboardLayout", "System.SetKeyboardLayouts":
+		return true
+	default:
+		return false
+	}
+}
 
 func (ec *eventClient) writeLoop() {
 	for data := range ec.out {
@@ -55,14 +81,42 @@ func New(c ipc.Compositor, path string) *Server {
 		fmt.Printf("Warning: Failed to initialize Wayland Idle Manager: %v\n", err)
 	}
 
+	servicesCtx, servicesStop := context.WithCancel(context.Background())
 	s := &Server{
-		compositor: c,
-		socketPath: path,
-		cache:      ipc.NewStateCache(),
-		cfgState:   NewConfigState(),
-		keyMon:     keymon.NewMonitor(),
-		clients:    make(map[net.Conn]*eventClient),
-		idleMgr:    idleMgr,
+		compositor:   c,
+		socketPath:   path,
+		cache:        ipc.NewStateCache(),
+		cfgState:     NewConfigState(),
+		iconResolver: icons.NewResolver(),
+		keyMon:       keymon.NewMonitor(),
+		clients:      make(map[net.Conn]*eventClient),
+		idleMgr:      idleMgr,
+		servicesCtx:  servicesCtx,
+		servicesStop: servicesStop,
+	}
+	if apps, appsErr := applications.NewCatalog(); appsErr == nil {
+		s.apps = apps
+		if watchErr := apps.StartWatching(servicesCtx, func([]applications.Entry) {
+			s.mu.Lock()
+			s.appRevision++
+			revision := s.appRevision
+			s.mu.Unlock()
+			s.broadcastStandaloneEvent("Event.ApplicationsChanged", map[string]uint64{"revision": revision})
+		}); watchErr != nil {
+			fmt.Printf("Warning: Failed to watch application entries: %v\n", watchErr)
+		}
+	} else {
+		fmt.Printf("Warning: Failed to initialize application catalog: %v\n", appsErr)
+	}
+	if service, serviceErr := notifications.New(); serviceErr == nil {
+		s.notifications = service
+	} else {
+		fmt.Printf("Warning: Failed to initialize notification service: %v\n", serviceErr)
+	}
+	if service, serviceErr := tray.New(); serviceErr == nil {
+		s.tray = service
+	} else {
+		fmt.Printf("Warning: Failed to initialize tray service: %v\n", serviceErr)
 	}
 	if idleMgr != nil {
 		idleMgr.SetIdleMonitorCallback(s.handleIdleMonitorChanged)
@@ -70,9 +124,83 @@ func New(c ipc.Compositor, path string) *Server {
 	if s.isMango() {
 		s.cfgState.Seed(ipc.ConfigUniversal{})
 	}
-	s.initCache()
-	go s.watchEvents()
+	if c != nil {
+		s.initCache()
+		go s.watchEvents()
+	}
 	return s
+}
+
+func (s *Server) Close() {
+	if s.servicesStop != nil {
+		s.servicesStop()
+	}
+	if s.idleMgr != nil {
+		_ = s.idleMgr.Close()
+	}
+	if s.notifications != nil {
+		_ = s.notifications.Close()
+	}
+	if s.tray != nil {
+		_ = s.tray.Close()
+	}
+}
+
+func (s *Server) StartServices() {
+	if s.notifications != nil {
+		events, cancel := s.notifications.Subscribe()
+		if err := s.notifications.Start(); err != nil {
+			fmt.Printf("Warning: Notification D-Bus service: %v\n", err)
+		}
+		go func() {
+			defer cancel()
+			for {
+				select {
+				case <-s.servicesCtx.Done():
+					return
+				case event, ok := <-events:
+					if !ok {
+						return
+					}
+					method := map[string]string{
+						"received":        "Event.NotificationReceived",
+						"action-invoked":  "Event.NotificationActionInvoked",
+						"closed":          "Event.NotificationClosed",
+						"deleted":         "Event.NotificationDeleted",
+						"history-cleared": "Event.NotificationHistoryCleared",
+						"dnd-changed":     "Event.NotificationDNDChanged",
+					}[event.Type]
+					if method != "" {
+						s.broadcastStandaloneEvent(method, event)
+					}
+				}
+			}
+		}()
+	}
+	if s.tray != nil {
+		events, cancel := s.tray.Subscribe()
+		if err := s.tray.Start(); err != nil {
+			fmt.Printf("Warning: StatusNotifier tray service: %v\n", err)
+		}
+		go func() {
+			defer cancel()
+			for {
+				select {
+				case <-s.servicesCtx.Done():
+					return
+				case event, ok := <-events:
+					if !ok {
+						return
+					}
+					method := "Event.TrayChanged"
+					if event.Type == "removed" {
+						method = "Event.TrayItemRemoved"
+					}
+					s.broadcastStandaloneEvent(method, event)
+				}
+			}
+		}()
+	}
 }
 
 func (s *Server) initCache() {
@@ -438,6 +566,9 @@ func (s *Server) resolveID(id string) (string, error) {
 	if id != "" {
 		return id, nil
 	}
+	if s.compositor == nil {
+		return "", fmt.Errorf("no supported compositor is available")
+	}
 	return s.compositor.ActiveWindow()
 }
 
@@ -466,9 +597,17 @@ func (s *Server) handleConnection(conn net.Conn) {
 		}
 
 		resp := Response{ID: req.ID}
+		if s.compositor == nil && requiresCompositor(req.Method) {
+			resp.Error = "no supported compositor is available"
+			if err := enc.Encode(resp); err != nil {
+				return
+			}
+			continue
+		}
 
 		var err error
 		var result interface{}
+		startSubscription := false
 
 		switch req.Method {
 		case "Window.List":
@@ -1484,28 +1623,379 @@ func (s *Server) handleConnection(conn net.Conn) {
 			err = RestoreBrightness(p.Monitor)
 
 		case "System.Subscribe":
-			s.clientsMu.Lock()
-			if ec, ok := s.clients[conn]; ok {
-				close(ec.out)
-			}
-			ec := &eventClient{conn: conn, out: make(chan []byte, eventClientQueueSize)}
-			s.clients[conn] = ec
-			s.clientsMu.Unlock()
-			go ec.writeLoop()
-			notif := Notification{
-				JSONRPC: "2.0",
-				Method:  "State.Dump",
-				State: &StateDump{
-					Windows:    s.cache.GetWindows(),
-					Workspaces: s.cache.GetWorkspaces(),
-					Monitors:   s.cache.GetMonitors(),
-				},
-			}
-			if data, err := json.Marshal(notif); err == nil {
-				data = append(data, '\n')
-				ec.out <- data
-			}
+			startSubscription = true
 			result = "subscribed"
+		case "Application.List":
+			if s.apps == nil {
+				err = fmt.Errorf("application catalog is unavailable")
+				break
+			}
+			result = s.apps.List()
+		case "Application.Top":
+			var p struct {
+				Limit int `json:"limit"`
+			}
+			if err = json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
+			if s.apps == nil {
+				err = fmt.Errorf("application catalog is unavailable")
+				break
+			}
+			result = s.apps.Top(p.Limit)
+		case "Application.Get":
+			var p struct {
+				ID string `json:"id"`
+			}
+			if err = json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
+			if s.apps == nil {
+				err = fmt.Errorf("application catalog is unavailable")
+				break
+			}
+			var found bool
+			result, found = s.apps.Get(p.ID)
+			if !found {
+				err = fmt.Errorf("application %q not found", p.ID)
+			}
+		case "Application.Resolve":
+			var p struct {
+				Identity string `json:"identity"`
+			}
+			if err = json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
+			if s.apps == nil {
+				err = fmt.Errorf("application catalog is unavailable")
+				break
+			}
+			var found bool
+			result, found = s.apps.Resolve(p.Identity)
+			if !found {
+				err = fmt.Errorf("application %q not found", p.Identity)
+			}
+		case "Application.Search":
+			var p struct {
+				Query string `json:"query"`
+				Limit int    `json:"limit"`
+			}
+			if err = json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
+			if s.apps == nil {
+				err = fmt.Errorf("application catalog is unavailable")
+				break
+			}
+			result = s.apps.Search(p.Query, p.Limit)
+		case "Application.Launch":
+			var p struct {
+				ID       string   `json:"id"`
+				ActionID string   `json:"actionId"`
+				URIs     []string `json:"uris"`
+			}
+			if err = json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
+			if s.apps == nil {
+				err = fmt.Errorf("application catalog is unavailable")
+				break
+			}
+			err = s.apps.Launch(p.ID, p.ActionID, p.URIs)
+		case "Application.RecordUsage":
+			var p struct {
+				ID string `json:"id"`
+			}
+			if err = json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
+			if s.apps == nil {
+				err = fmt.Errorf("application catalog is unavailable")
+				break
+			}
+			err = s.apps.RecordUsage(p.ID)
+		case "Application.Revision":
+			s.mu.RLock()
+			result = map[string]uint64{"revision": s.appRevision}
+			s.mu.RUnlock()
+		case "Icon.Resolve":
+			var p struct {
+				Name  string `json:"name"`
+				Size  int    `json:"size"`
+				Scale int    `json:"scale"`
+			}
+			if err = json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
+			result = map[string]string{"path": s.iconResolver.Resolve(p.Name, p.Size, p.Scale)}
+		case "Icon.ResolveMany":
+			var p struct {
+				Names []string `json:"names"`
+				Size  int      `json:"size"`
+				Scale int      `json:"scale"`
+			}
+			if err = json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
+			resolved := make(map[string]string, len(p.Names))
+			for _, name := range p.Names {
+				resolved[name] = s.iconResolver.Resolve(name, p.Size, p.Scale)
+			}
+			result = resolved
+		case "Icon.Theme":
+			result = map[string]string{"name": s.iconResolver.Theme()}
+		case "Service.Status":
+			result = map[string]interface{}{
+				"apiVersion":    1,
+				"compositor":    s.compositorName(),
+				"applications":  s.apps != nil,
+				"icons":         s.iconResolver != nil,
+				"notifications": s.notifications != nil && s.notifications.Status() == "available",
+				"tray":          s.tray != nil && s.tray.Status() == "available",
+			}
+		case "Notification.List", "Notification.History":
+			if s.notifications == nil {
+				err = fmt.Errorf("notification service is unavailable")
+				break
+			}
+			result = s.notifications.Snapshot()
+		case "Notification.Active":
+			if s.notifications == nil {
+				err = fmt.Errorf("notification service is unavailable")
+				break
+			}
+			result = s.notifications.Active()
+		case "Notification.Status":
+			if s.notifications == nil {
+				result = map[string]string{"status": "unavailable"}
+			} else {
+				result = map[string]string{"status": s.notifications.Status()}
+			}
+		case "Notification.Send":
+			var p struct {
+				AppName         string `json:"appName"`
+				AppIcon         string `json:"appIcon"`
+				Summary         string `json:"summary"`
+				Body            string `json:"body"`
+				Image           string `json:"image"`
+				Urgency         string `json:"urgency"`
+				Timeout         int32  `json:"expireTimeout"`
+				HistoryPriority int    `json:"historyPriority"`
+				ReplaceKey      string `json:"replaceKey"`
+				OwnerToken      string `json:"ownerToken"`
+				Popup           *bool  `json:"popup"`
+				Actions         []struct {
+					ID    string `json:"identifier"`
+					Label string `json:"text"`
+				} `json:"actions"`
+			}
+			if err = json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
+			if s.notifications == nil {
+				err = fmt.Errorf("notification service is unavailable")
+				break
+			}
+			actions := make([]notifications.Action, 0, len(p.Actions))
+			for _, action := range p.Actions {
+				actions = append(actions, notifications.Action{ID: action.ID, Label: action.Label})
+			}
+			urgency := uint8(1)
+			switch strings.ToLower(p.Urgency) {
+			case "low", "0":
+				urgency = 0
+			case "critical", "2":
+				urgency = 2
+			}
+			timeout := p.Timeout
+			popup := true
+			if p.Popup != nil {
+				popup = *p.Popup
+			}
+			var id uint32
+			id, err = s.notifications.NotifyInternal(notifications.Notification{
+				AppName: p.AppName, AppIcon: p.AppIcon, Summary: p.Summary, Body: p.Body, Image: p.Image,
+				Urgency: urgency, Timeout: timeout, HistoryPriority: p.HistoryPriority, ReplaceKey: p.ReplaceKey,
+				OwnerToken: p.OwnerToken, Actions: actions, Popup: popup,
+			})
+			if err == nil {
+				result = map[string]uint32{"id": id}
+			}
+		case "Notification.Close", "Notification.Dismiss", "Notification.Delete":
+			var p struct {
+				ID uint32 `json:"id"`
+			}
+			if err = json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
+			if s.notifications == nil {
+				err = fmt.Errorf("notification service is unavailable")
+				break
+			}
+			if req.Method == "Notification.Dismiss" {
+				s.notifications.Dismiss(p.ID)
+			} else if req.Method == "Notification.Delete" {
+				s.notifications.Delete(p.ID)
+			} else {
+				s.notifications.CloseUser(p.ID)
+			}
+		case "Notification.Action":
+			var p struct {
+				ID       uint32 `json:"id"`
+				ActionID string `json:"actionId"`
+			}
+			if err = json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
+			if s.notifications == nil {
+				err = fmt.Errorf("notification service is unavailable")
+				break
+			}
+			err = s.notifications.InvokeAction(p.ID, p.ActionID)
+		case "Notification.Pause", "Notification.Resume":
+			var p struct {
+				ID uint32 `json:"id"`
+			}
+			if err = json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
+			if s.notifications == nil {
+				err = fmt.Errorf("notification service is unavailable")
+				break
+			}
+			if req.Method == "Notification.Pause" {
+				s.notifications.Pause(p.ID)
+			} else {
+				s.notifications.Resume(p.ID)
+			}
+		case "Notification.ClearHistory":
+			if s.notifications == nil {
+				err = fmt.Errorf("notification service is unavailable")
+				break
+			}
+			err = s.notifications.ClearHistory()
+		case "Notification.Clear":
+			if s.notifications == nil {
+				err = fmt.Errorf("notification service is unavailable")
+				break
+			}
+			err = s.notifications.ClearAll()
+		case "Notification.SetDND":
+			var p struct {
+				Enabled bool `json:"enabled"`
+			}
+			if err = json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
+			if s.notifications == nil {
+				err = fmt.Errorf("notification service is unavailable")
+				break
+			}
+			s.notifications.SetDoNotDisturb(p.Enabled)
+		case "Notification.DND":
+			if s.notifications == nil {
+				result = map[string]bool{"enabled": false}
+			} else {
+				result = map[string]bool{"enabled": s.notifications.DoNotDisturb()}
+			}
+		case "Tray.List":
+			if s.tray == nil {
+				err = fmt.Errorf("tray service is unavailable")
+				break
+			}
+			result = s.tray.List()
+		case "Tray.Status":
+			if s.tray == nil {
+				result = map[string]string{"status": "unavailable"}
+			} else {
+				result = map[string]string{"status": s.tray.Status()}
+			}
+		case "Tray.Activate", "Tray.SecondaryActivate", "Tray.ContextMenu":
+			var p struct {
+				ID string `json:"id"`
+				X  int32  `json:"x"`
+				Y  int32  `json:"y"`
+			}
+			if err = json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
+			if s.tray == nil {
+				err = fmt.Errorf("tray service is unavailable")
+				break
+			}
+			switch req.Method {
+			case "Tray.Activate":
+				err = s.tray.Activate(p.ID, p.X, p.Y)
+			case "Tray.SecondaryActivate":
+				err = s.tray.SecondaryActivate(p.ID, p.X, p.Y)
+			default:
+				err = s.tray.ContextMenu(p.ID, p.X, p.Y)
+			}
+		case "Tray.Scroll":
+			var p struct {
+				ID          string `json:"id"`
+				Delta       int32  `json:"delta"`
+				Orientation string `json:"orientation"`
+			}
+			if err = json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
+			if s.tray == nil {
+				err = fmt.Errorf("tray service is unavailable")
+				break
+			}
+			err = s.tray.Scroll(p.ID, p.Delta, p.Orientation)
+		case "Tray.Menu":
+			var p struct {
+				ID string `json:"id"`
+			}
+			if err = json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
+			if s.tray == nil {
+				err = fmt.Errorf("tray service is unavailable")
+				break
+			}
+			var revision uint32
+			var items []tray.MenuItem
+			revision, items, err = s.tray.Menu(p.ID)
+			if err == nil {
+				result = map[string]interface{}{"revision": revision, "items": items}
+			}
+		case "Tray.MenuEvent":
+			var p struct {
+				ID     string `json:"id"`
+				MenuID int32  `json:"menuId"`
+				Event  string `json:"event"`
+			}
+			if err = json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
+			if s.tray == nil {
+				err = fmt.Errorf("tray service is unavailable")
+				break
+			}
+			if p.Event == "" {
+				p.Event = "clicked"
+			}
+			err = s.tray.MenuEvent(p.ID, p.MenuID, p.Event)
 
 		default:
 			resp.Error = "method not found"
@@ -1519,7 +2009,42 @@ func (s *Server) handleConnection(conn net.Conn) {
 			resp.Result = "ok"
 		}
 
-		enc.Encode(resp)
+		if err := enc.Encode(resp); err != nil {
+			return
+		}
+		if startSubscription {
+			s.startSubscription(conn)
+			for {
+				var ignored json.RawMessage
+				if err := dec.Decode(&ignored); err != nil {
+					return
+				}
+			}
+		}
+	}
+}
+
+func (s *Server) startSubscription(conn net.Conn) {
+	s.clientsMu.Lock()
+	if ec, ok := s.clients[conn]; ok {
+		close(ec.out)
+	}
+	ec := &eventClient{conn: conn, out: make(chan []byte, eventClientQueueSize)}
+	s.clients[conn] = ec
+	s.clientsMu.Unlock()
+	go ec.writeLoop()
+	notif := Notification{
+		JSONRPC: "2.0",
+		Method:  "State.Dump",
+		State: &StateDump{
+			Windows:    s.cache.GetWindows(),
+			Workspaces: s.cache.GetWorkspaces(),
+			Monitors:   s.cache.GetMonitors(),
+		},
+	}
+	if data, err := json.Marshal(notif); err == nil {
+		data = append(data, '\n')
+		ec.out <- data
 	}
 }
 
@@ -1573,6 +2098,24 @@ func (s *Server) broadcastEvent(method string, params interface{}) {
 		select {
 		case ec.out <- data:
 		default:
+			_ = ec.conn.Close()
+		}
+	}
+}
+
+func (s *Server) broadcastStandaloneEvent(method string, params interface{}) {
+	data, err := json.Marshal(Notification{JSONRPC: "2.0", Method: method, Params: params})
+	if err != nil {
+		return
+	}
+	data = append(data, '\n')
+	s.clientsMu.RLock()
+	defer s.clientsMu.RUnlock()
+	for _, ec := range s.clients {
+		select {
+		case ec.out <- data:
+		default:
+			_ = ec.conn.Close()
 		}
 	}
 }

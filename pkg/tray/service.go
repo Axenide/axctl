@@ -1,0 +1,796 @@
+package tray
+
+import (
+	"bytes"
+	"context"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"fmt"
+	"image"
+	"image/color"
+	"image/png"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/godbus/dbus/v5"
+	"github.com/godbus/dbus/v5/introspect"
+	"github.com/godbus/dbus/v5/prop"
+)
+
+const (
+	watcherName      = "org.kde.StatusNotifierWatcher"
+	watcherPath      = dbus.ObjectPath("/StatusNotifierWatcher")
+	watcherInterface = "org.kde.StatusNotifierWatcher"
+	itemInterface    = "org.kde.StatusNotifierItem"
+	menuInterface    = "com.canonical.dbusmenu"
+)
+
+type Item struct {
+	ID           string `json:"id"`
+	Service      string `json:"service"`
+	ObjectPath   string `json:"objectPath"`
+	Category     string `json:"category"`
+	Title        string `json:"title"`
+	Status       string `json:"status"`
+	IconName     string `json:"iconName,omitempty"`
+	IconPath     string `json:"iconPath,omitempty"`
+	OverlayIcon  string `json:"overlayIcon,omitempty"`
+	ToolTipTitle string `json:"toolTipTitle,omitempty"`
+	ToolTip      string `json:"toolTip,omitempty"`
+	Menu         string `json:"menu,omitempty"`
+	ItemIsMenu   bool   `json:"itemIsMenu"`
+}
+
+type Event struct {
+	Type  string `json:"type"`
+	ID    string `json:"id,omitempty"`
+	Items []Item `json:"items,omitempty"`
+}
+
+type ItemRef struct {
+	Service string
+	Owner   string
+	Path    dbus.ObjectPath
+}
+
+type IconPixmap struct {
+	Width  int32
+	Height int32
+	Data   []byte
+}
+
+type tooltip struct {
+	IconName string
+	IconData []IconPixmap
+	Title    string
+	Text     string
+}
+
+type MenuItem struct {
+	ID          int32      `json:"id"`
+	Label       string     `json:"label,omitempty"`
+	Enabled     bool       `json:"enabled"`
+	Visible     bool       `json:"visible"`
+	IconName    string     `json:"iconName,omitempty"`
+	IconData    string     `json:"iconData,omitempty"`
+	Type        string     `json:"type,omitempty"`
+	ToggleType  string     `json:"toggleType,omitempty"`
+	ToggleState int32      `json:"toggleState,omitempty"`
+	Children    []MenuItem `json:"children,omitempty"`
+}
+
+type menuNode struct {
+	ID         int32
+	Properties map[string]dbus.Variant
+	Children   []dbus.Variant
+}
+
+type Service struct {
+	mu         sync.RWMutex
+	conn       *dbus.Conn
+	properties *prop.Properties
+	status     string
+	items      map[string]Item
+	refs       map[string]ItemRef
+	hosts      map[string]struct{}
+	listeners  map[chan Event]struct{}
+	stop       chan struct{}
+	closed     bool
+	cacheDir   string
+}
+
+func New() (*Service, error) {
+	cacheHome := os.Getenv("XDG_CACHE_HOME")
+	if cacheHome == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return nil, err
+		}
+		cacheHome = filepath.Join(home, ".cache")
+	}
+	return &Service{
+		status:    "stopped",
+		items:     make(map[string]Item),
+		refs:      make(map[string]ItemRef),
+		hosts:     make(map[string]struct{}),
+		listeners: make(map[chan Event]struct{}),
+		stop:      make(chan struct{}),
+		cacheDir:  filepath.Join(cacheHome, "axctl", "tray"),
+	}, nil
+}
+
+func (s *Service) Start() error {
+	if os.Getenv("AXCTL_TRAY") == "0" {
+		s.setStatus("disabled")
+		return nil
+	}
+	conn, err := dbus.ConnectSessionBus()
+	if err != nil {
+		s.setStatus("unavailable: " + err.Error())
+		return err
+	}
+	reply, err := conn.RequestName(watcherName, dbus.NameFlagDoNotQueue)
+	if err != nil {
+		conn.Close()
+		s.setStatus("unavailable: " + err.Error())
+		return err
+	}
+	if reply != dbus.RequestNameReplyPrimaryOwner {
+		conn.Close()
+		err = fmt.Errorf("D-Bus name %s is already owned", watcherName)
+		s.setStatus("conflict: " + err.Error())
+		return err
+	}
+	if err := conn.Export(s, watcherPath, watcherInterface); err != nil {
+		_, _ = conn.ReleaseName(watcherName)
+		conn.Close()
+		s.setStatus("unavailable: " + err.Error())
+		return err
+	}
+	registeredItems := []string{}
+	props, err := prop.Export(conn, watcherPath, prop.Map{
+		watcherInterface: {
+			"RegisteredStatusNotifierItems":  &prop.Prop{Value: registeredItems, Emit: prop.EmitTrue},
+			"IsStatusNotifierHostRegistered": &prop.Prop{Value: false, Emit: prop.EmitTrue},
+			"ProtocolVersion":                &prop.Prop{Value: int32(0), Emit: prop.EmitConst},
+		},
+	})
+	if err != nil {
+		conn.Export(nil, watcherPath, watcherInterface)
+		_, _ = conn.ReleaseName(watcherName)
+		conn.Close()
+		s.setStatus("unavailable: " + err.Error())
+		return err
+	}
+	introspection := introspect.NewIntrospectable(&introspect.Node{
+		Name: string(watcherPath),
+		Interfaces: []introspect.Interface{{
+			Name:    watcherInterface,
+			Methods: introspect.Methods(s),
+			Properties: []introspect.Property{
+				{Name: "RegisteredStatusNotifierItems", Type: "as", Access: "read"},
+				{Name: "IsStatusNotifierHostRegistered", Type: "b", Access: "read"},
+				{Name: "ProtocolVersion", Type: "i", Access: "read"},
+			},
+			Signals: []introspect.Signal{
+				{Name: "StatusNotifierItemRegistered", Args: []introspect.Arg{{Name: "service", Type: "s"}}},
+				{Name: "StatusNotifierItemUnregistered", Args: []introspect.Arg{{Name: "service", Type: "s"}}},
+				{Name: "StatusNotifierHostRegistered"},
+				{Name: "StatusNotifierHostUnregistered"},
+			},
+		}, prop.IntrospectData},
+	})
+	if err := conn.Export(introspection, watcherPath, "org.freedesktop.DBus.Introspectable"); err != nil {
+		conn.Export(nil, watcherPath, watcherInterface)
+		_, _ = conn.ReleaseName(watcherName)
+		conn.Close()
+		s.setStatus("unavailable: " + err.Error())
+		return err
+	}
+	ch := make(chan *dbus.Signal, 128)
+	conn.Signal(ch)
+	if err := conn.AddMatchSignal(
+		dbus.WithMatchInterface("org.freedesktop.DBus"),
+		dbus.WithMatchMember("NameOwnerChanged"),
+	); err != nil {
+		conn.RemoveSignal(ch)
+		conn.Close()
+		s.setStatus("unavailable: " + err.Error())
+		return err
+	}
+	s.mu.Lock()
+	s.conn = conn
+	s.properties = props
+	s.status = "available"
+	s.mu.Unlock()
+	uniqueName := string(conn.Names()[0])
+	if call := conn.Object(watcherName, watcherPath).Call(watcherInterface+".RegisterStatusNotifierHost", 0, uniqueName); call.Err != nil {
+		fmt.Fprintf(os.Stderr, "[tray] register host: %v\n", call.Err)
+	}
+	go s.signalLoop(ch)
+	return nil
+}
+
+func (s *Service) Close() error {
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return nil
+	}
+	s.closed = true
+	close(s.stop)
+	conn := s.conn
+	listeners := make([]chan Event, 0, len(s.listeners))
+	for listener := range s.listeners {
+		listeners = append(listeners, listener)
+		delete(s.listeners, listener)
+	}
+	s.mu.Unlock()
+	for _, listener := range listeners {
+		close(listener)
+	}
+	if conn == nil {
+		return nil
+	}
+	_, _ = conn.ReleaseName(watcherName)
+	return conn.Close()
+}
+
+func (s *Service) Status() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.status
+}
+
+func (s *Service) List() []Item {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result := make([]Item, 0, len(s.items))
+	for _, item := range s.items {
+		result = append(result, item)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].Category != result[j].Category {
+			return result[i].Category < result[j].Category
+		}
+		return result[i].ID < result[j].ID
+	})
+	return result
+}
+
+func (s *Service) Subscribe() (<-chan Event, func()) {
+	ch := make(chan Event, 64)
+	s.mu.Lock()
+	if s.closed {
+		close(ch)
+		s.mu.Unlock()
+		return ch, func() {}
+	}
+	s.listeners[ch] = struct{}{}
+	s.mu.Unlock()
+	var once sync.Once
+	return ch, func() {
+		once.Do(func() {
+			s.mu.Lock()
+			if _, exists := s.listeners[ch]; exists {
+				delete(s.listeners, ch)
+				close(ch)
+			}
+			s.mu.Unlock()
+		})
+	}
+}
+
+func (s *Service) RegisterStatusNotifierItem(sender dbus.Sender, service string) *dbus.Error {
+	address := service
+	path := dbus.ObjectPath("/StatusNotifierItem")
+	if address == "" {
+		service = string(sender)
+	} else if strings.HasPrefix(address, "/") {
+		service = string(sender)
+		path = dbus.ObjectPath(address)
+	} else if strings.Contains(address, "/") {
+		parts := strings.SplitN(address, "/", 2)
+		service = parts[0]
+		path = dbus.ObjectPath("/" + parts[1])
+	}
+	if !path.IsValid() || !strings.HasPrefix(service, ":") && !dbusNameValid(service) {
+		return dbus.MakeFailedError(fmt.Errorf("invalid status notifier item address"))
+	}
+	ref := ItemRef{Service: service, Owner: string(sender), Path: path}
+	id := itemID(ref)
+	s.mu.Lock()
+	if _, exists := s.refs[id]; exists {
+		s.mu.Unlock()
+		return nil
+	}
+	s.refs[id] = ref
+	s.mu.Unlock()
+	if err := s.watchItem(ref); err != nil {
+		s.removeItem(id, false)
+		return dbus.MakeFailedError(err)
+	}
+	if err := s.refreshItem(id); err != nil {
+		s.removeItem(id, false)
+		return dbus.MakeFailedError(err)
+	}
+	s.mu.RLock()
+	conn := s.conn
+	items := s.registeredItemsLocked()
+	item := s.items[id]
+	s.mu.RUnlock()
+	if conn != nil {
+		_ = conn.Emit(watcherPath, watcherInterface+".StatusNotifierItemRegistered", itemAddress(ref))
+	}
+	s.updateWatcherProperties(items)
+	s.publish(Event{Type: "changed", Items: s.List()})
+	if item.ID == "" {
+		return dbus.MakeFailedError(fmt.Errorf("status notifier item did not publish properties"))
+	}
+	return nil
+}
+
+func (s *Service) RegisterStatusNotifierHost(sender dbus.Sender, service string) *dbus.Error {
+	name := service
+	if name == "" {
+		name = string(sender)
+	}
+	s.mu.Lock()
+	s.hosts[name] = struct{}{}
+	first := len(s.hosts) == 1
+	props := s.properties
+	conn := s.conn
+	s.mu.Unlock()
+	if props != nil {
+		props.SetMust(watcherInterface, "IsStatusNotifierHostRegistered", true)
+	}
+	if first && conn != nil {
+		_ = conn.Emit(watcherPath, watcherInterface+".StatusNotifierHostRegistered")
+	}
+	return nil
+}
+
+func (s *Service) IsStatusNotifierHostRegistered() (bool, *dbus.Error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return len(s.hosts) > 0, nil
+}
+
+func (s *Service) RegisteredStatusNotifierItems() ([]string, *dbus.Error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.registeredItemsLocked(), nil
+}
+
+func (s *Service) ProtocolVersion() (int32, *dbus.Error) {
+	return 0, nil
+}
+
+func (s *Service) Activate(id string, x, y int32) error {
+	return s.callItem(id, "Activate", x, y)
+}
+
+func (s *Service) SecondaryActivate(id string, x, y int32) error {
+	return s.callItem(id, "SecondaryActivate", x, y)
+}
+
+func (s *Service) ContextMenu(id string, x, y int32) error {
+	return s.callItem(id, "ContextMenu", x, y)
+}
+
+func (s *Service) Scroll(id string, delta int32, orientation string) error {
+	if orientation != "horizontal" {
+		orientation = "vertical"
+	}
+	return s.callItem(id, "Scroll", delta, orientation)
+}
+
+func (s *Service) Menu(id string) (uint32, []MenuItem, error) {
+	s.mu.RLock()
+	item, exists := s.items[id]
+	ref := s.refs[id]
+	s.mu.RUnlock()
+	if !exists || item.Menu == "" {
+		return 0, nil, fmt.Errorf("tray item %q has no menu", id)
+	}
+	path := dbus.ObjectPath(item.Menu)
+	if !path.IsValid() {
+		return 0, nil, fmt.Errorf("tray item %q has invalid menu path", id)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	obj := s.conn.Object(ref.Service, path)
+	call := obj.CallWithContext(ctx, menuInterface+".AboutToShow", 0, int32(0))
+	if call.Err != nil && call.Err.Error() != "" {
+		return 0, nil, call.Err
+	}
+	var revision uint32
+	var layout menuNode
+	call = obj.CallWithContext(ctx, menuInterface+".GetLayout", 0, int32(0), int32(-1), []string{})
+	if call.Err != nil {
+		return 0, nil, call.Err
+	}
+	if err := call.Store(&revision, &layout); err != nil {
+		return 0, nil, err
+	}
+	return revision, s.menuChildren(layout.Children), nil
+}
+
+func (s *Service) MenuEvent(id string, menuID int32, event string) error {
+	s.mu.RLock()
+	item, exists := s.items[id]
+	ref := s.refs[id]
+	s.mu.RUnlock()
+	if !exists || item.Menu == "" {
+		return fmt.Errorf("tray item %q has no menu", id)
+	}
+	path := dbus.ObjectPath(item.Menu)
+	if !path.IsValid() {
+		return fmt.Errorf("tray item %q has invalid menu path", id)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	obj := s.conn.Object(ref.Service, path)
+	return obj.CallWithContext(ctx, menuInterface+".Event", 0, menuID, event, dbus.MakeVariant(int32(0)), uint32(time.Now().UnixMilli())).Err
+}
+
+func (s *Service) callItem(id, method string, args ...any) error {
+	s.mu.RLock()
+	ref, exists := s.refs[id]
+	s.mu.RUnlock()
+	if !exists {
+		return fmt.Errorf("tray item %q not found", id)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	return s.conn.Object(ref.Service, ref.Path).CallWithContext(ctx, itemInterface+"."+method, 0, args...).Err
+}
+
+func (s *Service) watchItem(ref ItemRef) error {
+	conn := s.conn
+	if conn == nil {
+		return fmt.Errorf("tray watcher is not connected")
+	}
+	return conn.AddMatchSignal(
+		dbus.WithMatchSender(ref.Owner),
+		dbus.WithMatchObjectPath(ref.Path),
+		dbus.WithMatchInterface(itemInterface),
+	)
+}
+
+func (s *Service) signalLoop(ch chan *dbus.Signal) {
+	for {
+		select {
+		case <-s.stop:
+			return
+		case signal, ok := <-ch:
+			if !ok {
+				return
+			}
+			if signal == nil {
+				continue
+			}
+			if signal.Name == "org.freedesktop.DBus.NameOwnerChanged" && len(signal.Body) >= 3 {
+				name, _ := signal.Body[0].(string)
+				owner, _ := signal.Body[1].(string)
+				newOwner, _ := signal.Body[2].(string)
+				if strings.HasPrefix(name, ":") && owner != "" && newOwner == "" {
+					s.removeOwner(name)
+				}
+				continue
+			}
+			if signal.Name == itemInterface+".NewTitle" || signal.Name == itemInterface+".NewIcon" || signal.Name == itemInterface+".NewAttentionIcon" || signal.Name == itemInterface+".NewOverlayIcon" || signal.Name == itemInterface+".NewToolTip" || signal.Name == itemInterface+".NewStatus" || signal.Name == itemInterface+".NewMenu" || signal.Name == itemInterface+".NewItemIsMenu" {
+				id := itemID(ItemRef{Service: signal.Sender, Path: signal.Path})
+				if id == "" {
+					s.mu.RLock()
+					for candidate, ref := range s.refs {
+						if ref.Path == signal.Path && ref.Owner == signal.Sender {
+							id = candidate
+							break
+						}
+					}
+					s.mu.RUnlock()
+				}
+				if id != "" {
+					_ = s.refreshItem(id)
+					s.publish(Event{Type: "changed", Items: s.List()})
+				}
+			}
+		}
+	}
+}
+
+func (s *Service) refreshItem(id string) error {
+	s.mu.RLock()
+	ref, exists := s.refs[id]
+	conn := s.conn
+	s.mu.RUnlock()
+	if !exists || conn == nil {
+		return fmt.Errorf("tray item %q not found", id)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	var values map[string]dbus.Variant
+	if err := conn.Object(ref.Service, ref.Path).CallWithContext(ctx, "org.freedesktop.DBus.Properties.GetAll", 0, itemInterface).Store(&values); err != nil {
+		return err
+	}
+	item := Item{
+		ID:         id,
+		Service:    ref.Service,
+		ObjectPath: string(ref.Path),
+		Category:   variantString(values["Category"], "ApplicationStatus"),
+		Title:      variantString(values["Title"], ""),
+		Status:     variantString(values["Status"], "Active"),
+		IconName:   variantString(values["IconName"], ""),
+		Menu:       variantObjectPath(values["Menu"]),
+		ItemIsMenu: variantBool(values["ItemIsMenu"]),
+	}
+	if iconPath := variantString(values["IconName"], ""); filepath.IsAbs(iconPath) {
+		item.IconPath = iconPath
+	}
+	if tooltipValue, ok := values["ToolTip"]; ok {
+		var tip tooltip
+		if tooltipValue.Store(&tip) == nil {
+			item.ToolTipTitle = tip.Title
+			item.ToolTip = tip.Text
+			if item.IconName == "" {
+				item.IconName = tip.IconName
+			}
+			if item.IconName == "" && len(tip.IconData) > 0 {
+				item.IconPath, _ = s.savePixmap(tip.IconData)
+			}
+		}
+	}
+	if item.IconName == "" {
+		if path, err := s.savePixmapVariant(values["IconPixmap"]); err == nil {
+			item.IconPath = path
+		}
+	}
+	if item.IconPath == "" && item.IconName != "" && filepath.IsAbs(item.IconName) {
+		item.IconPath = item.IconName
+	}
+	if item.Title == "" {
+		item.Title = variantString(values["Id"], id)
+	}
+	s.mu.Lock()
+	s.items[id] = item
+	s.mu.Unlock()
+	return nil
+}
+
+func (s *Service) savePixmapVariant(value dbus.Variant) (string, error) {
+	var pixmaps []IconPixmap
+	if err := value.Store(&pixmaps); err != nil {
+		return "", err
+	}
+	return s.savePixmap(pixmaps)
+}
+
+func (s *Service) savePixmap(pixmaps []IconPixmap) (string, error) {
+	if len(pixmaps) == 0 {
+		return "", fmt.Errorf("no icon pixmaps")
+	}
+	sort.SliceStable(pixmaps, func(i, j int) bool {
+		return pixmaps[i].Width*pixmaps[i].Height > pixmaps[j].Width*pixmaps[j].Height
+	})
+	pixmap := pixmaps[0]
+	if pixmap.Width < 1 || pixmap.Height < 1 || pixmap.Width > 2048 || pixmap.Height > 2048 || int64(pixmap.Width)*int64(pixmap.Height)*4 > 16*1024*1024 || len(pixmap.Data) < int(pixmap.Width*pixmap.Height*4) {
+		return "", fmt.Errorf("invalid icon pixmap dimensions")
+	}
+	img := image.NewRGBA(image.Rect(0, 0, int(pixmap.Width), int(pixmap.Height)))
+	for y := 0; y < int(pixmap.Height); y++ {
+		for x := 0; x < int(pixmap.Width); x++ {
+			offset := (y*int(pixmap.Width) + x) * 4
+			img.SetRGBA(x, y, color.RGBA{R: pixmap.Data[offset], G: pixmap.Data[offset+1], B: pixmap.Data[offset+2], A: pixmap.Data[offset+3]})
+		}
+	}
+	var buffer bytes.Buffer
+	if err := png.Encode(&buffer, img); err != nil {
+		return "", err
+	}
+	content := buffer.Bytes()
+	hash := sha256.Sum256(content)
+	if err := os.MkdirAll(s.cacheDir, 0o700); err != nil {
+		return "", err
+	}
+	path := filepath.Join(s.cacheDir, hex.EncodeToString(hash[:])+".png")
+	if err := os.WriteFile(path, content, 0o600); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+func (s *Service) menuChildren(children []dbus.Variant) []MenuItem {
+	result := make([]MenuItem, 0, len(children))
+	for _, childVariant := range children {
+		var child menuNode
+		if err := childVariant.Store(&child); err != nil {
+			continue
+		}
+		item := menuNodeToItem(child)
+		item.Children = s.menuChildren(child.Children)
+		if item.Visible {
+			result = append(result, item)
+		}
+	}
+	return result
+}
+
+func menuNodeToItem(node menuNode) MenuItem {
+	item := MenuItem{ID: node.ID, Enabled: true, Visible: true}
+	item.Label = variantString(node.Properties["label"], "")
+	item.Enabled = variantBoolDefault(node.Properties["enabled"], true)
+	item.Visible = variantBoolDefault(node.Properties["visible"], true)
+	item.IconName = variantString(node.Properties["icon-name"], "")
+	item.IconData, _ = variantBytes(node.Properties["icon-data"])
+	item.Type = variantString(node.Properties["type"], "")
+	item.ToggleType = variantString(node.Properties["toggle-type"], "")
+	item.ToggleState = variantInt32(node.Properties["toggle-state"])
+	return item
+}
+
+func (s *Service) removeItem(id string, emit bool) {
+	s.mu.Lock()
+	ref, exists := s.refs[id]
+	if !exists {
+		s.mu.Unlock()
+		return
+	}
+	delete(s.refs, id)
+	delete(s.items, id)
+	conn := s.conn
+	items := s.registeredItemsLocked()
+	s.mu.Unlock()
+	if conn != nil {
+		_ = conn.RemoveMatchSignal(dbus.WithMatchSender(ref.Owner), dbus.WithMatchObjectPath(ref.Path), dbus.WithMatchInterface(itemInterface))
+		if emit {
+			_ = conn.Emit(watcherPath, watcherInterface+".StatusNotifierItemUnregistered", itemAddress(ref))
+		}
+	}
+	s.updateWatcherProperties(items)
+	if emit {
+		s.publish(Event{Type: "removed", ID: id})
+	}
+}
+
+func (s *Service) removeOwner(owner string) {
+	s.mu.RLock()
+	ids := make([]string, 0)
+	for id, ref := range s.refs {
+		if ref.Owner == owner {
+			ids = append(ids, id)
+		}
+	}
+	s.mu.RUnlock()
+	for _, id := range ids {
+		s.removeItem(id, true)
+	}
+	s.mu.Lock()
+	delete(s.hosts, owner)
+	last := len(s.hosts) == 0
+	props := s.properties
+	conn := s.conn
+	s.mu.Unlock()
+	if props != nil {
+		props.SetMust(watcherInterface, "IsStatusNotifierHostRegistered", !last)
+	}
+	if last && conn != nil {
+		_ = conn.Emit(watcherPath, watcherInterface+".StatusNotifierHostUnregistered")
+	}
+}
+
+func (s *Service) registeredItemsLocked() []string {
+	items := make([]string, 0, len(s.refs))
+	for _, ref := range s.refs {
+		items = append(items, itemAddress(ref))
+	}
+	sort.Strings(items)
+	return items
+}
+
+func (s *Service) updateWatcherProperties(items []string) {
+	s.mu.RLock()
+	props := s.properties
+	s.mu.RUnlock()
+	if props != nil {
+		props.SetMust(watcherInterface, "RegisteredStatusNotifierItems", items)
+	}
+}
+
+func (s *Service) publish(event Event) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for listener := range s.listeners {
+		select {
+		case listener <- event:
+		default:
+			close(listener)
+			delete(s.listeners, listener)
+		}
+	}
+}
+
+func (s *Service) setStatus(status string) {
+	s.mu.Lock()
+	s.status = status
+	s.mu.Unlock()
+}
+
+func itemID(ref ItemRef) string {
+	return string(ref.Service) + string(ref.Path)
+}
+
+func itemAddress(ref ItemRef) string {
+	return ref.Service + string(ref.Path)
+}
+
+func dbusNameValid(name string) bool {
+	if strings.HasPrefix(name, ":") {
+		name = strings.TrimPrefix(name, ":")
+	}
+	parts := strings.Split(name, ".")
+	if len(parts) < 2 {
+		return false
+	}
+	for _, part := range parts {
+		if part == "" {
+			return false
+		}
+		for _, char := range part {
+			if !(char >= 'a' && char <= 'z' || char >= 'A' && char <= 'Z' || char >= '0' && char <= '9' || char == '_' || char == '-') {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func variantString(value dbus.Variant, fallback string) string {
+	if result, ok := value.Value().(string); ok {
+		return result
+	}
+	return fallback
+}
+
+func variantObjectPath(value dbus.Variant) string {
+	if result, ok := value.Value().(dbus.ObjectPath); ok {
+		return string(result)
+	}
+	return ""
+}
+
+func variantBool(value dbus.Variant) bool {
+	result, _ := value.Value().(bool)
+	return result
+}
+
+func variantBoolDefault(value dbus.Variant, fallback bool) bool {
+	result, ok := value.Value().(bool)
+	if !ok {
+		return fallback
+	}
+	return result
+}
+
+func variantInt32(value dbus.Variant) int32 {
+	if result, ok := value.Value().(int32); ok {
+		return result
+	}
+	return 0
+}
+
+func variantBytes(value dbus.Variant) (string, error) {
+	data, ok := value.Value().([]byte)
+	if !ok {
+		return "", fmt.Errorf("invalid menu icon data")
+	}
+	if len(data) == 0 || len(data) > 4*1024*1024 {
+		return "", fmt.Errorf("invalid menu icon size")
+	}
+	return "data:image/png;base64," + base64.StdEncoding.EncodeToString(data), nil
+}

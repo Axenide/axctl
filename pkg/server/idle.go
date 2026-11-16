@@ -94,6 +94,18 @@ func NewIdleManager() (*IdleManager, error) {
 	return im, nil
 }
 
+func (im *IdleManager) Close() error {
+	im.mu.Lock()
+	defer im.mu.Unlock()
+	if im.systemInhibitor.cancel != nil {
+		im.systemInhibitor.cancel()
+	}
+	if im.display == nil {
+		return nil
+	}
+	return im.display.Context().Close()
+}
+
 // connectWayland opens a fresh Wayland connection and binds the required
 // globals (wl_compositor, wl_seat, ext_idle_notifier_v1,
 // zwp_idle_inhibit_manager_v1). Used both for initial setup and for
