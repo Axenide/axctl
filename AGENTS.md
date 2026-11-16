@@ -77,3 +77,7 @@ go build -o axctl .
 - **Hyprland**: Uses `$HYPRLAND_INSTANCE_SIGNATURE` for socket paths.
 - **Niri**: Uses `$NIRI_SOCKET` for IPC.
 - **Mango**: Uses `MANGO_INSTANCE_SIGNATURE` (normally `$XDG_RUNTIME_DIR/mango-$PID.sock`) and can discover the live socket when the Mango desktop is detected.
+
+## DOCUMENTATION
+- Write user-facing documentation in English and keep `docs/` aligned with implemented behavior. When adding or changing functionality, document the user-visible CLI, IPC, configuration, service, or backend behavior in the relevant page and review existing documentation for affected behavior.
+- Treat documentation as a user guide and reference, not a changelog. Update `docs/wayland_schema.json` when shared JSON data models change.

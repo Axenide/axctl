@@ -1,7 +1,8 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "Axctl Universal Wayland RPC Schema",
-  "description": "Universal JSON-RPC structures for Axctl to interact with Wayland compositors (Hyprland, Niri, Mango, etc.)",
+  "title": "Axctl Shared State Schema",
+  "description": "Schema for the shared state dump and common data structures returned by axctl. This does not describe the full JSON-RPC protocol.",
+  "$ref": "#/definitions/StateDump",
   "type": "object",
   "definitions": {
     "Monitor": {
@@ -25,6 +26,14 @@
         },
         "height": {
           "type": "integer"
+        },
+        "logical_width": {
+          "type": "integer",
+          "description": "Output width in logical compositor coordinates, when available."
+        },
+        "logical_height": {
+          "type": "integer",
+          "description": "Output height in logical compositor coordinates, when available."
         },
         "refresh_rate": {
           "type": "number"
@@ -84,7 +93,8 @@
         "id",
         "name",
         "monitor_id",
-        "is_active"
+        "is_active",
+        "is_empty"
       ],
       "additionalProperties": false
     },
@@ -134,7 +144,10 @@
         "title",
         "app_id",
         "workspace_id",
-        "is_focused"
+        "is_focused",
+        "is_floating",
+        "is_fullscreen",
+        "is_hidden"
       ],
       "additionalProperties": false
     },
@@ -171,9 +184,61 @@
       ],
       "additionalProperties": false
     },
-    "CompositorState": {
+    "Layout": {
       "type": "object",
-      "description": "Root state structure representing the entire Wayland desktop environment.",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "current": {
+          "type": "boolean"
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "dynamic",
+            "static"
+          ]
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "additionalProperties": false
+    },
+    "Layouts": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Layout"
+          }
+        },
+        "active": {
+          "type": "string"
+        },
+        "compositor": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "dynamic",
+            "static"
+          ]
+        }
+      },
+      "required": [
+        "items",
+        "compositor",
+        "source"
+      ],
+      "additionalProperties": false
+    },
+    "StateDump": {
+      "type": "object",
+      "description": "State payload sent by System.Subscribe. overview_open is omitted when unknown and is absent from the initial dump.",
       "properties": {
         "monitors": {
           "type": "array",
@@ -193,15 +258,14 @@
             "$ref": "#/definitions/Window"
           }
         },
-        "capabilities": {
-          "$ref": "#/definitions/Capabilities"
+        "overview_open": {
+          "type": "boolean"
         }
       },
       "required": [
         "monitors",
         "workspaces",
-        "windows",
-        "capabilities"
+        "windows"
       ],
       "additionalProperties": false
     }

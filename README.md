@@ -9,7 +9,7 @@ Hyprland, Niri, and Mango via a JSON-RPC API over a Unix socket.
 ## What it does
 
 - Runs a compositor-aware daemon that auto-detects Hyprland, Niri, or Mango
-- Exposes a single JSON-RPC interface over `/tmp/axctl-$UID.sock`
+- Exposes a single JSON-RPC interface over a local Unix socket
 - Provides a CLI for window and workspace management, configuration, and system
   helpers
 - Watches a TOML config file and applies changes live when possible
@@ -20,11 +20,18 @@ Hyprland, Niri, and Mango via a JSON-RPC API over a Unix socket.
 - Niri
 - Mango
 
+## Documentation
+
+See the [axctl documentation](docs/README.md) for the CLI, IPC API, TOML
+configuration, data model, compositor differences, and system services.
+
 ## Architecture overview
 
 - `axctl daemon` detects the active compositor and starts a JSON-RPC server
 - `axctl <command>` is a client that sends JSON-RPC requests to the daemon
-- The socket lives at `/tmp/axctl-$UID.sock`
+- The socket defaults to `$XDG_RUNTIME_DIR/axctl.sock`; see
+  [Architecture](docs/architecture.md#axctl-socket-and-authorization) for
+  overrides and the fallback path.
 
 ## Install
 
@@ -41,7 +48,7 @@ writing to `/usr/local/bin`. On other distros it also adds your user to the
 
 ### Build from source
 
-Requires Go 1.25+.
+Requires Go 1.27.1 or newer.
 
 ```bash
 go build -o axctl .
@@ -244,9 +251,9 @@ The daemon uses these environment variables to detect sockets:
   absolute path such as `$XDG_RUNTIME_DIR/mango-<pid>.sock`). When unset,
   axctl detects `XDG_CURRENT_DESKTOP=mango` and discovers a live Mango socket.
 
-The daemon listens on:
-
-`/tmp/axctl-$UID.sock`
+The daemon and CLI resolve the socket path in this order: `AXCTL_SOCKET` when
+set, `$XDG_RUNTIME_DIR/axctl.sock` when `XDG_RUNTIME_DIR` is set, and otherwise
+`/tmp/axctl-<uid>.sock`.
 
 ## Modifier-alone binds
 
@@ -292,8 +299,9 @@ Niri requirements:
 ## Troubleshooting
 
 - `Error: axctl daemon is already running.`
-  - Stop the existing daemon or delete a stale `/tmp/axctl-$UID.sock` and
-    restart.
+  - Stop the existing daemon or remove the stale socket at the effective path
+    (`AXCTL_SOCKET`, `$XDG_RUNTIME_DIR/axctl.sock`, or the `/tmp` fallback),
+    then restart.
 - `Error: no supported compositor detected`
   - Ensure your compositor is running and the expected socket variables are
     set (see Environment and sockets).
