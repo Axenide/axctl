@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"image"
 	"image/color"
@@ -53,9 +54,9 @@ type Event struct {
 }
 
 type ItemRef struct {
-	Service string
-	Owner   string
-	Path    dbus.ObjectPath
+	Service string          `json:"service"`
+	Owner   string          `json:"owner"`
+	Path    dbus.ObjectPath `json:"path"`
 }
 
 type IconPixmap struct {
@@ -92,6 +93,7 @@ type menuNode struct {
 
 type Service struct {
 	mu         sync.RWMutex
+	persistMu  sync.Mutex
 	conn       *dbus.Conn
 	properties *prop.Properties
 	status     string
@@ -102,6 +104,7 @@ type Service struct {
 	stop       chan struct{}
 	closed     bool
 	cacheDir   string
+	statePath  string
 }
 
 func New() (*Service, error) {
@@ -113,6 +116,11 @@ func New() (*Service, error) {
 		}
 		cacheHome = filepath.Join(home, ".cache")
 	}
+	cacheDir := filepath.Join(cacheHome, "axctl", "tray")
+	statePath := filepath.Join(cacheDir, "registrations.json")
+	if runtimeDir := os.Getenv("XDG_RUNTIME_DIR"); runtimeDir != "" {
+		statePath = filepath.Join(runtimeDir, "axctl", "tray-items.json")
+	}
 	return &Service{
 		status:    "stopped",
 		items:     make(map[string]Item),
@@ -120,7 +128,8 @@ func New() (*Service, error) {
 		hosts:     make(map[string]struct{}),
 		listeners: make(map[chan Event]struct{}),
 		stop:      make(chan struct{}),
-		cacheDir:  filepath.Join(cacheHome, "axctl", "tray"),
+		cacheDir:  cacheDir,
+		statePath: statePath,
 	}, nil
 }
 
@@ -213,6 +222,7 @@ func (s *Service) Start() error {
 		fmt.Fprintf(os.Stderr, "[tray] register host: %v\n", call.Err)
 	}
 	go s.signalLoop(ch)
+	s.restoreItems()
 	return nil
 }
 
@@ -237,8 +247,122 @@ func (s *Service) Close() error {
 	if conn == nil {
 		return nil
 	}
+	if err := s.persistRefs(); err != nil {
+		fmt.Fprintf(os.Stderr, "[tray] persist registrations: %v\n", err)
+	}
 	_, _ = conn.ReleaseName(watcherName)
 	return conn.Close()
+}
+
+func (s *Service) restoreItems() {
+	data, err := os.ReadFile(s.statePath)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			fmt.Fprintf(os.Stderr, "[tray] read registrations: %v\n", err)
+		}
+		return
+	}
+	var refs []ItemRef
+	if err := json.Unmarshal(data, &refs); err != nil {
+		fmt.Fprintf(os.Stderr, "[tray] decode registrations: %v\n", err)
+		return
+	}
+	restored := false
+	for _, ref := range refs {
+		if s.restoreItem(ref) {
+			restored = true
+		}
+	}
+	s.updateWatcherProperties(s.registeredItems())
+	if restored {
+		s.publish(Event{Type: "changed", Items: s.List()})
+	}
+	if err := s.persistRefs(); err != nil {
+		fmt.Fprintf(os.Stderr, "[tray] persist registrations: %v\n", err)
+	}
+}
+
+func (s *Service) restoreItem(ref ItemRef) bool {
+	if ref.Service == "" || ref.Owner == "" || !ref.Path.IsValid() || !s.ownerMatches(ref) {
+		return false
+	}
+	id := itemID(ref)
+	s.mu.RLock()
+	_, exists := s.refs[id]
+	s.mu.RUnlock()
+	if exists || s.watchItem(ref) != nil {
+		return false
+	}
+	s.mu.Lock()
+	if _, exists := s.refs[id]; exists {
+		s.mu.Unlock()
+		return false
+	}
+	s.refs[id] = ref
+	s.mu.Unlock()
+	if err := s.refreshItem(id); err != nil {
+		s.removeItem(id, false)
+		return false
+	}
+	if conn := s.conn; conn != nil {
+		_ = conn.Emit(watcherPath, watcherInterface+".StatusNotifierItemRegistered", itemAddress(ref))
+	}
+	return true
+}
+
+func (s *Service) ownerMatches(ref ItemRef) bool {
+	conn := s.conn
+	if conn == nil {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	call := conn.BusObject().CallWithContext(ctx, "org.freedesktop.DBus.GetNameOwner", 0, ref.Service)
+	if call.Err != nil {
+		return false
+	}
+	var owner string
+	return call.Store(&owner) == nil && owner == ref.Owner
+}
+
+func (s *Service) persistRefs() error {
+	s.persistMu.Lock()
+	defer s.persistMu.Unlock()
+	s.mu.RLock()
+	refs := make([]ItemRef, 0, len(s.refs))
+	for _, ref := range s.refs {
+		refs = append(refs, ref)
+	}
+	s.mu.RUnlock()
+	sort.Slice(refs, func(i, j int) bool {
+		return itemID(refs[i]) < itemID(refs[j])
+	})
+	data, err := json.Marshal(refs)
+	if err != nil {
+		return err
+	}
+	dir := filepath.Dir(s.statePath)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	temp, err := os.CreateTemp(dir, ".tray-items-*.tmp")
+	if err != nil {
+		return err
+	}
+	tempPath := temp.Name()
+	defer os.Remove(tempPath)
+	if _, err := temp.Write(data); err != nil {
+		_ = temp.Close()
+		return err
+	}
+	if err := temp.Sync(); err != nil {
+		_ = temp.Close()
+		return err
+	}
+	if err := temp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tempPath, s.statePath)
 }
 
 func (s *Service) Status() string {
@@ -261,6 +385,12 @@ func (s *Service) List() []Item {
 		return result[i].ID < result[j].ID
 	})
 	return result
+}
+
+func (s *Service) registeredItems() []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.registeredItemsLocked()
 }
 
 func (s *Service) Subscribe() (<-chan Event, func()) {
@@ -329,6 +459,9 @@ func (s *Service) RegisterStatusNotifierItem(sender dbus.Sender, service string)
 	}
 	s.updateWatcherProperties(items)
 	s.publish(Event{Type: "changed", Items: s.List()})
+	if err := s.persistRefs(); err != nil {
+		fmt.Fprintf(os.Stderr, "[tray] persist registrations: %v\n", err)
+	}
 	if item.ID == "" {
 		return dbus.MakeFailedError(fmt.Errorf("status notifier item did not publish properties"))
 	}
@@ -582,11 +715,11 @@ func (s *Service) savePixmap(pixmaps []IconPixmap) (string, error) {
 	if pixmap.Width < 1 || pixmap.Height < 1 || pixmap.Width > 2048 || pixmap.Height > 2048 || int64(pixmap.Width)*int64(pixmap.Height)*4 > 16*1024*1024 || len(pixmap.Data) < int(pixmap.Width*pixmap.Height*4) {
 		return "", fmt.Errorf("invalid icon pixmap dimensions")
 	}
-	img := image.NewRGBA(image.Rect(0, 0, int(pixmap.Width), int(pixmap.Height)))
+	img := image.NewNRGBA(image.Rect(0, 0, int(pixmap.Width), int(pixmap.Height)))
 	for y := 0; y < int(pixmap.Height); y++ {
 		for x := 0; x < int(pixmap.Width); x++ {
 			offset := (y*int(pixmap.Width) + x) * 4
-			img.SetRGBA(x, y, color.RGBA{R: pixmap.Data[offset], G: pixmap.Data[offset+1], B: pixmap.Data[offset+2], A: pixmap.Data[offset+3]})
+			img.SetNRGBA(x, y, color.NRGBA{A: pixmap.Data[offset], R: pixmap.Data[offset+1], G: pixmap.Data[offset+2], B: pixmap.Data[offset+3]})
 		}
 	}
 	var buffer bytes.Buffer
@@ -655,6 +788,9 @@ func (s *Service) removeItem(id string, emit bool) {
 	s.updateWatcherProperties(items)
 	if emit {
 		s.publish(Event{Type: "removed", ID: id})
+		if err := s.persistRefs(); err != nil {
+			fmt.Fprintf(os.Stderr, "[tray] persist registrations: %v\n", err)
+		}
 	}
 }
 

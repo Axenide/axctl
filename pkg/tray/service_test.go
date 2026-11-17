@@ -6,6 +6,8 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"image/png"
+
 	"github.com/godbus/dbus/v5"
 	"github.com/godbus/dbus/v5/prop"
 )
@@ -51,7 +53,7 @@ func TestMenuLayoutConversion(t *testing.T) {
 
 func TestSavePixmapPersistsDeterministicImage(t *testing.T) {
 	service := &Service{cacheDir: filepath.Join(t.TempDir(), "icons")}
-	pixmap := []IconPixmap{{Width: 1, Height: 1, Data: []byte{255, 0, 0, 255}}}
+	pixmap := []IconPixmap{{Width: 1, Height: 1, Data: []byte{255, 32, 64, 128}}}
 	first, err := service.savePixmap(pixmap)
 	if err != nil {
 		t.Fatal(err)
@@ -65,6 +67,19 @@ func TestSavePixmapPersistsDeterministicImage(t *testing.T) {
 	}
 	if _, err := os.Stat(first); err != nil {
 		t.Fatal(err)
+	}
+	file, err := os.Open(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	img, err := png.Decode(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, g, b, a := img.At(0, 0).RGBA()
+	if got := [4]uint32{r >> 8, g >> 8, b >> 8, a >> 8}; got != [4]uint32{32, 64, 128, 255} {
+		t.Fatalf("decoded pixel = %#v, want ARGB32 [255, 32, 64, 128] converted to RGBA [32, 64, 128, 255]", got)
 	}
 }
 
@@ -106,6 +121,9 @@ func (m *fakeDBusMenu) Event(_ int32, _ string, _ dbus.Variant, _ uint32) *dbus.
 
 func TestStatusNotifierWatcherRegistration(t *testing.T) {
 	t.Setenv("AXCTL_TRAY", "1")
+	tempDir := t.TempDir()
+	t.Setenv("XDG_RUNTIME_DIR", filepath.Join(tempDir, "runtime"))
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(tempDir, "cache"))
 	service, err := New()
 	if err != nil {
 		t.Fatal(err)
@@ -168,5 +186,21 @@ func TestStatusNotifierWatcherRegistration(t *testing.T) {
 	}
 	if fakeMenu.events.Load() != 1 {
 		t.Fatalf("menu events = %d", fakeMenu.events.Load())
+	}
+	if err := service.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	restarted, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := restarted.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer restarted.Close()
+	restoredItems := restarted.List()
+	if len(restoredItems) != 1 || restoredItems[0].ID != items[0].ID || restoredItems[0].Title != "Fake Item" {
+		t.Fatalf("restored items = %#v", restoredItems)
 	}
 }
