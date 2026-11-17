@@ -24,6 +24,11 @@ description, icon, executable, parsed arguments, categories, keywords, MIME
 types, actions, working directory, `StartupWMClass`, `TryExec`, and flags such
 as `Terminal`/`DBusActivatable`.
 
+The `icon` field is usually a theme icon name, though a desktop entry may
+provide a path. Pass it to `Icon.Resolve` or `Icon.ResolveMany` to get a
+resolved path. These methods resolve requested names; there is no API to
+enumerate every icon in an icon theme.
+
 ### Search, ranking, and launch
 
 - `Application.Search` matches the name, command, executable, comment,

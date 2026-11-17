@@ -247,7 +247,7 @@ that root file and does not replace its contents with the generated file.
 
 ```ini
 # Mango, in the root config
-source=~/.config/axctl/mango/axctl.generated.conf
+source=~/.config/mango/axctl.generated.conf
 ```
 
 For niri, the generated KDL file includes an `include` directive in its header
@@ -264,10 +264,11 @@ compositor.
 ## Runtime configuration
 
 `Config.Set` and `Config.Batch` are runtime operations; they do not write back
-to the TOML file. On Hyprland they update keywords. On niri and Mango,
-universal appearance keys are applied to a cached payload and the config file
-is regenerated. Mango also accepts several native options. When the daemon
-restarts, cached state is rebuilt from TOML or from an explicit `Config.Apply`.
+to the TOML file. On Hyprland they update keywords. On niri, universal
+appearance settings update cached state and regenerate the KDL file. Mango
+routes universal appearance settings through cached state and generated config,
+while other options use Mango's native runtime API. When the daemon restarts,
+cached state is rebuilt from TOML or from an explicit `Config.Apply`.
 
 `Config.Reload` only asks the compositor to reload. To change the persistent
 source, edit the TOML file; the watcher applies changes when it detects them.

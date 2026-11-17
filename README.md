@@ -345,7 +345,7 @@ The generated Mango config uses the current `.conf` option names. Include the
 generated file from your Mango root config, for example:
 
 ```ini
-source=~/.config/axctl/mango/axctl.generated.conf
+source=~/.config/mango/axctl.generated.conf
 ```
 
 Generated keybind changes are applied by reloading Mango's root config.

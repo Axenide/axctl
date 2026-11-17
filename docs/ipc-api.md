@@ -103,7 +103,7 @@ and the current layout is returned. A backend may use a static list; check
 |---|---|---|
 | `Config.Get` | `{ "key": string }` | Config value. On niri and for some Mango keys, it is read from axctl's cached state. |
 | `Config.Set` | `{ "key": string, "value": any }` | Change an option or regenerate config, depending on the backend. |
-| `Config.Batch` | `{ "configs": { "key": value, ... } }` | Apply multiple options; niri uses only the cached universal settings. |
+| `Config.Batch` | `{ "configs": { "key": value, ... } }` | Apply multiple options. niri applies universal appearance settings through its cached generated config. Mango splits universal appearance settings (cached/generated config) from other settings (native runtime batch). Hyprland sends the batch to its runtime API. |
 | `Config.Apply` | `{ "payload": string }` | `payload` is a JSON string containing `ConfigUniversal`; writes generated files and reloads. |
 | `Config.KeybindsBatch` | `{ "payload": string }` | JSON string containing `{ "binds": Keybind[], "unbinds": KeybindTarget[] }`. |
 | `Config.BindKey` | `{ "mods": string, "key": string, "command": string }` | Add a keybind incrementally. Mango translates it to a generated keybind. |
