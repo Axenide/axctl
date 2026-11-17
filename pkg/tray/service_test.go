@@ -1,12 +1,11 @@
 package tray
 
 import (
+	"image/png"
 	"os"
 	"path/filepath"
 	"sync/atomic"
 	"testing"
-
-	"image/png"
 
 	"github.com/godbus/dbus/v5"
 	"github.com/godbus/dbus/v5/prop"
