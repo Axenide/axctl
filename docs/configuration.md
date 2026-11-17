@@ -227,9 +227,11 @@ generators may ignore properties and leave a note in the generated file.
 
 `[startup]` contains `exec` and `exec-once`. The root-level `exec` and
 `exec-once` keys are also accepted. Each accepts a string or a list of strings.
-`exec-once` represents one-time startup commands; `exec` represents recurring
-startup commands according to the generated backend format. In JSON IPC, the
-equivalent key is serialized as `exec_once`.
+`exec-once` represents one-time startup commands; it maps to native
+`exec-once` on Hyprland, `exec_once` on Mango, and `spawn-at-startup` on niri.
+`exec` maps to the compositor's regular `exec` form where available; niri
+cannot represent it and emits a comment instead. In JSON IPC, `exec-once` is
+serialized as `exec_once`.
 
 ## Generated files and integration
 

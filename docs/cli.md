@@ -107,7 +107,7 @@ read the TOML file again by itself.
 ```sh
 axctl system execute 'notify-send hello'
 axctl system get-cursor-position
-axctl system switch-keyboard-layout [next|prev]
+axctl system switch-keyboard-layout [next|prev|<index>]
 axctl system set-keyboard-layouts 'us,es' 'altgr-intl,'
 axctl system get-capabilities
 axctl system get-compositor

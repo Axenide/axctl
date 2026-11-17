@@ -203,9 +203,12 @@ multiple tags.
 
 ## Configuration
 
-The daemon loads TOML from:
+The preferred TOML path is:
 
-`~/.config/axctl/config.toml`
+`$XDG_CONFIG_HOME/axctl/config.toml` (or `~/.config/axctl/config.toml` when
+`XDG_CONFIG_HOME` is unset). If it does not exist, axctl checks the compatibility
+path `~/.local/share/ambxst/axctl.toml`. See the
+[configuration reference](docs/configuration.md) for details.
 
 If the file exists, the daemon will load it on startup and watch it for
 changes (including any `include` files), applying updates live when supported.
@@ -302,9 +305,12 @@ Niri requirements:
   - Stop the existing daemon or remove the stale socket at the effective path
     (`AXCTL_SOCKET`, `$XDG_RUNTIME_DIR/axctl.sock`, or the `/tmp` fallback),
     then restart.
-- `Error: no supported compositor detected`
-  - Ensure your compositor is running and the expected socket variables are
-    set (see Environment and sockets).
+- `No supported compositor detected; starting application and icon services only`
+  - This is a nonfatal startup message. The daemon continues without
+    compositor-dependent methods; compositor-independent services may still
+    be available. Check `Service.Status` for service availability. If you need
+    compositor features, check that your compositor is running and the expected
+    socket variables are set (see Environment and sockets).
 - `Error connecting to daemon`
   - Start the daemon with `axctl daemon` and verify the socket exists.
 - Super-alone binds do nothing (niri)
