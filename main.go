@@ -101,7 +101,7 @@ func usage() {
 	fmt.Println("    pin <0|1> [id]          Pin window")
 	fmt.Println("    toggle-group [id]       Toggle window group (Hyprland)")
 	fmt.Println("    group-nav <f|b>         Navigate group tabs")
-	fmt.Println("    layout-prop <k> <v> [id] Set layout property (Niri/Mango)")
+	fmt.Println("    layout-prop <k> <v> [id] Set Mango scroller layout property")
 	fmt.Println("    move-pixel <x> <y> [id] Move window exactly by pixel")
 	fmt.Println("    move-to-workspace-silent <ws> [id] Move window silently")
 	fmt.Println("\n  workspace <action> [args]")
@@ -153,12 +153,12 @@ func usage() {
 	fmt.Println("\n  system <action> [args]")
 	fmt.Println("    execute <cmd>           Execute command")
 	fmt.Println("    get-cursor-position     Get absolute cursor position")
-	fmt.Println("    switch-keyboard-layout [next|prev] Switch keyboard layout")
+	fmt.Println("    switch-keyboard-layout [next|prev|index] Switch keyboard layout")
 	fmt.Println("    set-keyboard-layouts <layouts> [variants] Set keyboard layouts (e.g. \"us,es\" \"altgr-intl,\")")
-	fmt.Println("    idle-inhibit <0|1>      Inhibit or allow idle/sleep")
-	fmt.Println("    idle-wait <ms>          Block until system is idle for <ms> milliseconds (honors inhibitors)")
-	fmt.Println("    resume-wait <ms>        Block until system resumes from <ms> milliseconds of idle")
-	fmt.Println("    is-idle <ms>            Check if system is currently idle for <ms> milliseconds (returns true/false)")
+	fmt.Println("    idle-inhibit <0|1>      Inhibit or allow compositor session idle")
+	fmt.Println("    idle-wait <ms>          Block until session is idle for <ms> milliseconds (honors inhibitors)")
+	fmt.Println("    resume-wait <ms>        Block until session activity resumes after idle")
+	fmt.Println("    is-idle <ms>            Check if session has been idle for <ms> milliseconds (returns true/false)")
 	fmt.Println("    input-idle-wait <ms>    Block until physical input is idle (ignores inhibitors)")
 	fmt.Println("    input-resume-wait <ms>  Block until physical input resumes")
 	fmt.Println("    is-input-idle <ms>      Check if physical input is idle (returns true/false)")
@@ -173,10 +173,10 @@ func usage() {
 	fmt.Println("    idle-inhibitor-destroy <id> Destroy an idle inhibitor")
 	fmt.Println("    inhibit-system <0|1>    Enable or disable system-wide idle inhibition (systemd)")
 	fmt.Println("    is-system-inhibited   Check if system-wide idle inhibition is active")
-	fmt.Println("    app-inhibit-check [patterns...] Check if apps are inhibiting idle (default: vlc,mpv,firefox,chromium,brave,steam)")
+	fmt.Println("    app-inhibit-check [patterns...] Check matching apps (default: vlc,mpv,firefox,chromium,chrome,brave,vivaldi,steam)")
 	fmt.Println("    media-inhibit-check   Check for active audio/media (PulseAudio/PipeWire)")
 	fmt.Println("    get-capabilities        Get compositor capabilities")
-	fmt.Println("    get-compositor          Get the compositor backend name (hyprland/niri/mango)")
+	fmt.Println("    get-compositor          Get the compositor backend name (hyprland/niri/mango/unknown)")
 	fmt.Println("    keymon-status           Show modifier-alone key monitor state (binds, devices, errors)")
 	fmt.Println("    exit                    Exit compositor")
 	fmt.Println("\n  darkmode <action>")
@@ -189,7 +189,7 @@ func usage() {
 	fmt.Println("    get <monitor>           Get current brightness for one device")
 	fmt.Println("    set <monitor> <0..1>    Set brightness (0..1) for one device or all")
 	fmt.Println("    adjust <monitor> <+/-0..1> Adjust brightness by delta")
-	fmt.Println("    save [monitor]          Save current brightness to XDG state")
+	fmt.Println("    save [monitor]          Save current brightness to XDG config")
 	fmt.Println("    restore [monitor]       Restore previously saved brightness")
 }
 
@@ -267,7 +267,7 @@ func runDaemon(customConfigPath string) {
 		fmt.Printf("Detected compositor: %T\n", comp)
 	} else {
 		comp = nil
-		fmt.Printf("No supported compositor detected; starting application and icon services only: %v\n", detectErr)
+		fmt.Printf("No supported compositor detected; starting without compositor-dependent features: %v\n", detectErr)
 	}
 	fmt.Println("Creating server...")
 

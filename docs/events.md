@@ -29,10 +29,11 @@ There is no event history: the snapshot received on connection is the starting
 point. Keep the connection open; close it to cancel the subscription. The same
 connection can no longer be used for regular RPC requests.
 
-`state` contains the normalized window, workspace, and monitor lists. Regular
-events may also include `overview_open`; it is optional and is not included in
-the initial `State.Dump`. Events unrelated to compositor state (such as
-applications, notifications, and tray events) do not include `state`.
+`state` contains the normalized window, workspace, and monitor lists. Events on
+the regular state-bearing path may also include `overview_open`; it is optional
+and is not included in the initial `State.Dump`. This path includes compositor
+events and the current idle-monitor and brightness events. Standalone
+application, notification, and tray events do not include `state`.
 
 ## Compositor events
 
@@ -58,11 +59,11 @@ Do not rely on fields that are not listed in the table.
 | `Event.IdleMonitorChanged` | `{ "id": uint, "is_idle": bool }` | An RPC-created idle monitor changes state. |
 | `Event.BrightnessChanged` | `{ "monitor": string, "value": number }` | Brightness is applied; `value` is the absolute normalized value from 0 to 1. |
 
-After `WindowCreated`, `WindowMoved`, workspace/monitor changes, fullscreen
-changes, and several other transitions, the daemon refreshes the cache
-snapshot. Events may therefore signal a change before the refreshed list is
-available. Use the attached `state` or query the list again if you need to
-reconcile a UI.
+For events that trigger a full cache refresh, the daemon refreshes before
+broadcasting; handlers for targeted changes patch the cache before broadcasting.
+The attached `state` is the cached snapshot at broadcast time, not an atomic
+compositor snapshot, and failed backend queries can leave cached fields stale.
+Query the list APIs again if you need to reconcile a UI with current state.
 
 ## Independent service events
 

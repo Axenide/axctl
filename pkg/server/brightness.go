@@ -244,7 +244,7 @@ func readBroadcastValue(d Device) (float64, bool) {
 	return *v, true
 }
 
-// brightnessSaveFile lives under XDG state (UserConfigDir on Linux) so
+// brightnessSaveFile lives under the XDG config directory so
 // restore survives reboots. Format: one line per monitor as
 // "<name>\t<percent>\n".
 func brightnessSaveFile() (string, error) {
@@ -387,7 +387,7 @@ func AdjustBrightness(name string, delta float64) error {
 }
 
 // SaveBrightness snapshots the current brightness of one or all known
-// devices to the XDG state file. An empty name saves every device.
+// devices to the XDG config file. An empty name saves every device.
 func SaveBrightness(name string) error {
 	saved, err := readSavedBrightness()
 	if err != nil {

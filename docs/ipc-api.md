@@ -101,16 +101,16 @@ and the current layout is returned. A backend may use a static list; check
 
 | Method | Parameters | Result/semantics |
 |---|---|---|
-| `Config.Get` | `{ "key": string }` | Config value. On niri and for some Mango keys, it is read from axctl's cached state. |
+| `Config.Get` | `{ "key": string }` | Hyprland queries the compositor. niri and Mango read supported universal appearance keys from axctl's cached state; Mango has no generic native config getter. |
 | `Config.Set` | `{ "key": string, "value": any }` | Change an option or regenerate config, depending on the backend. |
 | `Config.Batch` | `{ "configs": { "key": value, ... } }` | Apply multiple options. niri applies universal appearance settings through its cached generated config. Mango splits universal appearance settings (cached/generated config) from other settings (native runtime batch). Hyprland sends the batch to its runtime API. |
 | `Config.Apply` | `{ "payload": string }` | `payload` is a JSON string containing `ConfigUniversal`; writes generated files and reloads. |
 | `Config.KeybindsBatch` | `{ "payload": string }` | JSON string containing `{ "binds": Keybind[], "unbinds": KeybindTarget[] }`. |
-| `Config.BindKey` | `{ "mods": string, "key": string, "command": string }` | Add a keybind incrementally. Mango translates it to a generated keybind. |
-| `Config.UnbindKey` | `{ "mods": string, "key": string }` | Remove the keybind if the backend supports it. |
+| `Config.BindKey` | `{ "mods": string, "key": string, "command": string }` | Add a keybind incrementally. Mango writes it to generated config; niri only handles modifier-alone binds through axctl's key monitor. |
+| `Config.UnbindKey` | `{ "mods": string, "key": string }` | Remove the keybind if supported. Mango updates generated config; niri only handles modifier-alone binds through axctl's key monitor. |
 | `Config.RawBatch` | `{ "command": string }` | Native text batch; Hyprland only. |
 | `Config.Reload` | `{}` | Reload the compositor root config; does not reread TOML. |
-| `Config.GetAnimations` | `{}` | Animation data if provided by the backend. |
+| `Config.GetAnimations` | `{}` | Animation data on Hyprland; unsupported on niri and Mango. |
 
 A `Keybind` contains `modifiers: string[]`, `key`, `dispatcher`, `argument`,
 `enabled: bool`, and optional `flags`. `KeybindTarget` contains `modifiers` and
@@ -134,9 +134,15 @@ are described in [TOML configuration](configuration.md).
 
 ### Idle monitors and inhibitors
 
-All timeouts are in milliseconds. These calls require the corresponding
-Wayland extensions and may fail with `Idle management not supported on this
-session` or `idle_notify not supported by compositor`.
+All timeouts are in milliseconds. `IdleWait`, `ResumeWait`, `IsIdle`, the
+`Input*` methods, and enabling an idle monitor require the Wayland
+idle-notifier extension; enabling a Wayland inhibitor requires the idle-inhibit
+extension. Calls may fail with `Idle management not supported on this
+session`, `idle_notify not supported by compositor`, or
+`idle_inhibit not supported by compositor`. `System.InhibitSystem` uses
+`systemd-inhibit`, while the app/media checks use compositor, process, or audio
+data; all of these RPCs are also unavailable if the daemon could not initialize
+its Wayland idle manager.
 
 | Method | Parameters | Result/semantics |
 |---|---|---|
@@ -159,7 +165,7 @@ session` or `idle_notify not supported by compositor`.
 | `System.InhibitSystem` | `{ "on": bool }` | Start/stop `systemd-inhibit` to block system sleep/idle. |
 | `System.IsSystemInhibited` | `{}` | Returns the string `"true"` or `"false"`. |
 | `System.AppInhibitCheck` | `{ "patterns"?: string[] }` | Map of matching applications; see [Services](services.md). |
-| `System.MediaInhibitCheck` | `{}` | `{ "count": int, "apps": string[] }` for active audio streams. |
+| `System.MediaInhibitCheck` | `{}` | `{ "count": int, "apps": string[] (nullable) }` with distinct nonempty application names from sink inputs not marked muted/corked; `count` is the number of names, not streams. |
 
 Monitors and inhibitors live in daemon memory. Their IDs do not survive a
 process restart.
@@ -180,6 +186,10 @@ process restart.
 
 `Brightness.Set` and `Brightness.Adjust` emit `Event.BrightnessChanged` for
 devices whose values could be read back.
+
+Internal-panel IDs are kernel-derived, but the current `brightnessctl` calls
+select by class without passing an individual device name; see [System
+services](services.md) for the resulting multi-panel limitation.
 
 ## Applications, icons, and service status
 
@@ -225,6 +235,8 @@ For `Notification.Send`, urgency accepts `low`/`0`, `normal` (the default), and
 true. A timeout of `0` disables expiration for this IPC method; a negative
 value is normalized to 5000 ms. Do not confuse this with the special timeout
 value of the standard D-Bus `Notify` method, which has its own defaults.
+`historyPriority` and `ownerToken` are stored as metadata but do not currently
+affect history ordering, eviction, or ownership behavior.
 
 ## StatusNotifier tray
 
@@ -253,6 +265,8 @@ Send `System.Subscribe` and keep the connection open:
 ```
 
 The normal response (`result: "subscribed"`) is followed by a `State.Dump`
-notification. Subsequent messages contain `jsonrpc: "2.0"`, `method`,
-`params`, and, for compositor events, an attached `state`. See
-[Events and state](events.md) for the event catalog and lifecycle.
+notification. Subsequent messages contain `jsonrpc: "2.0"`, `method`, and
+`params`. Events on the regular state-bearing path (compositor, idle-monitor,
+and brightness events) also include `state`; standalone application,
+notification, and tray events do not. See [Events and state](events.md) for the
+event catalog and lifecycle.

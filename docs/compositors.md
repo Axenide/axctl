@@ -20,8 +20,8 @@ equivalent.
 | Special workspace | Yes, optional name | Not supported | Special tag only, no name |
 | Silent move-to-workspace | Yes | Yes | Only within the selected monitor |
 | Layouts | Introspection with fallback | Static `scrolling` list; `set` unsupported | Introspection with static fallback |
-| Appearance configuration | Runtime keywords and generated config | Generated/cached config; no generic native getter | Mango options and generated/cached config |
-| Incremental keybinds | Yes | Regenerates KDL file | Regenerates Mango file |
+| Appearance configuration | Runtime keywords and generated config | Generated/cached config; no generic native getter | Mango options and generated/cached config; no generic native getter |
+| Keybind updates | Native incremental/batch APIs | `Config.KeybindsBatch` regenerates KDL; `Config.BindKey`/`UnbindKey` are limited to modifier-alone binds | Regenerates Mango file |
 | `raw-batch` | Yes | No | No |
 
 The capability table does not imply that the same operations have identical
@@ -61,12 +61,18 @@ semantics. Relevant details follow.
   "ensure" a state.
 - The layout list is static and contains only `scrolling`, marked as current.
   `layout set` is not supported.
-- Pinning, groups, layout properties, incremental keybind RPC, `raw-batch`,
-  generic `GetConfig`, and cursor position are not supported.
+- Pinning, groups, layout properties, `raw-batch`, `GetAnimations`, and cursor
+  position are not supported. niri has no native generic config getter; axctl
+  serves supported universal appearance values from its cache.
+- `Config.BindKey` and `Config.UnbindKey` do not support ordinary keybinds;
+  modifier-alone binds are handled by axctl's key monitor. Use
+  `Config.KeybindsBatch` to update generated KDL keybinds.
 - Appearance settings are materialized as generated KDL. niri uses continuous
   scrolling, so switching to a different layout is not applicable. The
   generated file includes comments for universal options that cannot be
   represented (for example, outer gaps, opacity, blur, and shadows).
+  `animations.workspace_style` is ignored; `animations.enabled = false` emits
+  `animations { off }`, while `true` leaves niri's default animations enabled.
 
 ## Mango
 
@@ -95,6 +101,10 @@ semantics. Relevant details follow.
 - The `colresize +conf` preset dispatcher selects the next native preset;
   there is no `-conf`. For relative proportions, generated binds execute
   `axctl window layout-prop ...`, so `axctl` must be in `PATH`.
+- Mango has no generic runtime config getter or animation-state query.
+  `Config.Get` can read the universal appearance keys from axctl's cached
+  config. Mango-specific setter keys include `blur.brightness`,
+  `blur.contrast`, `blur.saturation`, `rounding`, `border_radius`, and `shadows`.
 - Generated configuration uses the current `.conf` option names. Mango has no
   IPC operation for unbinding a keybind; a duplicate bind in the root file
   may conflict with the generated one.

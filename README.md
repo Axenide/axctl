@@ -159,7 +159,7 @@ Supported config keys include:
 
 ```bash
 axctl system get-cursor-position
-axctl system switch-keyboard-layout [next|prev]
+axctl system switch-keyboard-layout [next|prev|<index>]
 axctl system set-keyboard-layouts "us,es" "altgr-intl,"
 axctl system idle-wait <ms>
 axctl system is-idle <ms>
@@ -178,18 +178,22 @@ axctl brightness list                  # all devices, with current 0..1
 axctl brightness get <monitor>         # read one device's brightness
 axctl brightness set <monitor> <0..1>  # set one device, or omit for all
 axctl brightness adjust <monitor> <+/-0..1>
-axctl brightness save [monitor]        # snapshot to XDG state dir
+axctl brightness save [monitor]        # snapshot under XDG config dir
 axctl brightness restore [monitor]     # reapply saved values
 ```
 
 Device names follow the convention `backlight-<kernel-dev>` for internal
 laptop panels (e.g. `backlight-intel_backlight`, `backlight-amdgpu_bl1`) and
 `ddc-<bus>` for external displays (e.g. `ddc-3` for `/dev/i2c-3`). Pass
-`backlight` to address every internal panel at once. Saved values persist
-across reboots in `$XDG_CONFIG_HOME/axctl/brightness.tsv`.
+`backlight` as the internal-panel group selector for list, set, adjust, and
+save. To restore saved values, omit the monitor (or pass `all`) to restore all
+saved devices, or use a specific device ID. Saved values persist across reboots
+in `$XDG_CONFIG_HOME/axctl/brightness.tsv`. See the services reference for the
+multi-panel limitation of the current `brightnessctl` calls.
 
-Successful `set`/`adjust` calls emit an `Event.BrightnessChanged`
-notification on the subscribe channel with `{monitor, value}`.
+Successful `set`/`adjust` calls emit `Event.BrightnessChanged` notifications
+on the subscribe channel with `{monitor, value}` when the resulting brightness
+can be read back.
 
 ### Notes on IDs
 
@@ -210,8 +214,10 @@ The preferred TOML path is:
 path `~/.local/share/ambxst/axctl.toml`. See the
 [configuration reference](docs/configuration.md) for details.
 
-If the file exists, the daemon will load it on startup and watch it for
-changes (including any `include` files), applying updates live when supported.
+When the file exists and a compositor is available, the daemon loads it and
+watches it and its `include` files for changes, applying updates live when
+supported. Without a compositor, it skips TOML application and the config
+watcher.
 
 Example snippet:
 

@@ -61,8 +61,10 @@ At startup, the daemon:
 2. Initializes the server, cache, and supporting services.
 3. If a compositor is available, reads the initial windows, workspaces, and
    monitors, then starts listening for compositor events.
-4. Loads the existing TOML file and generates the corresponding config. It
-   then watches the file and its existing imports for changes.
+4. If a compositor is available and the TOML file exists, loads it, generates
+   the corresponding config, and watches the file and its existing imports for
+   changes. Without a compositor, it skips TOML application and the config
+   watcher.
 5. Handles requests until it receives `SIGINT` or `SIGTERM`; on exit it closes
    services and removes the socket.
 
@@ -90,10 +92,11 @@ The data source depends on the operation:
 - Applications, icons, notifications, and tray data come from their respective
   services, not the window cache.
 
-The cache is optimized for frequent queries and may be updated after the event
-that triggered the update is delivered. Consumers that need current state
-should treat the event as a signal to reconcile with its attached state or
-query the lists again.
+The cache is optimized for frequent queries. The server refreshes or patches it
+before broadcasting the corresponding event where possible; the attached state
+is the cache snapshot at broadcast time, not an atomic compositor snapshot, and
+failed backend queries can leave cached fields stale. Consumers that need
+current state should query the lists again.
 
 ## Errors and limitations
 

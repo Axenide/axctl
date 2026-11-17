@@ -14,9 +14,11 @@ compatibility file `~/.local/share/ambxst/axctl.toml`. You can also specify a
 different file with `axctl -c <path> daemon`.
 
 All sections are optional. If no TOML file exists, the daemon runs without
-generating config. The daemon loads the file at startup if it exists and watches
-the main file and its resolved imports. Invalid TOML or a config generation
-error is reported in the logs; do not assume the new state was applied.
+generating config. If both the file and a compositor are available, the daemon
+attempts to load it at startup and watches the main file and its resolved
+imports. Without a compositor, TOML application and the config watcher are
+skipped. Invalid TOML or a config generation error is reported in the logs; do
+not assume the new state was applied.
 
 ## Imports and precedence
 
@@ -162,7 +164,9 @@ declared.
 The representation is shared, but not every key can be implemented by every
 compositor. In niri, for example, generic outer gaps, opacity, blur, and
 shadows are not translated; the generator leaves comments in the KDL file.
-See [Backends](compositors.md).
+niri maps `animations.enabled = false` to `animations { off }`, leaves its
+default animations enabled for `true`, and does not translate
+`animations.workspace_style`. See [Backends](compositors.md).
 
 ### `[input.keyboard]`
 

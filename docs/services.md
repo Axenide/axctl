@@ -85,8 +85,8 @@ existing owner. Query `Notification.Status` to distinguish `available`,
 
 Notifications are kept in two collections:
 
-- **Active**: visible/actionable notifications, with an expiration timer when
-  `timeout > 0`.
+- **Active**: notifications not yet closed or dismissed; entries can have
+  `popup=false`. They have an expiration timer when `timeout > 0`.
 - **History**: persistent, limited to 1000 entries. On restart, history is
   loaded but the active list is not reconstructed.
 
@@ -94,12 +94,16 @@ Persistent data:
 
 - History and DND: `$XDG_STATE_HOME/axctl/notifications.json` or
   `~/.local/state/axctl/notifications.json`.
-- Images received through D-Bus hints: under
-  `$XDG_CACHE_HOME/axctl/notifications/images` or `~/.cache/...`.
+- Raster image data received through D-Bus image-data hints is converted to PNG
+  and stored under `$XDG_CACHE_HOME/axctl/notifications/images` or
+  `~/.cache/...`. An existing absolute path supplied by an image-path hint is
+  used directly rather than copied.
 
-Do Not Disturb retains notifications and history but forces `popup=false`. A
-matching `replaceKey` replaces the active notification with the same ID and
-updates its history entry. Actions emitted by axctl produce
+When Do Not Disturb is enabled, newly received notifications are still retained
+in the active list and history but are stored with `popup=false`; changing DND
+does not alter notifications already active. A matching `replaceKey` replaces
+the active notification with the same ID and updates its history entry. Actions
+emitted by axctl produce
 `Event.NotificationActionInvoked`; non-resident notifications are closed when
 an action is invoked. `Delete` removes the history entry; `Dismiss`/`Close`
 only remove it from the active list; `Clear` closes active notifications and
@@ -125,7 +129,9 @@ when D-Bus owner changes indicate they have disappeared.
 Received pixmaps are decoded from the specification's network-order ARGB32
 format, converted to PNG, and cached in `$XDG_CACHE_HOME/axctl/tray` or
 `~/.cache/axctl/tray`. Registered D-Bus item references are cached in
-`$XDG_RUNTIME_DIR/axctl/tray-items.json` so a daemon restart can re-query items
+`$XDG_RUNTIME_DIR/axctl/tray-items.json`, or, when `XDG_RUNTIME_DIR` is unset,
+`$XDG_CACHE_HOME/axctl/tray/registrations.json` (defaulting to
+`~/.cache/axctl/tray/registrations.json`). A daemon restart can re-query items
 whose owning applications are still running; stale references are discarded.
 The tray RPC API has no CLI subcommands; use the methods described in the
 [IPC API](ipc-api.md).
@@ -145,9 +151,20 @@ Common IDs:
 | ID | Meaning |
 |---|---|
 | `backlight-<kernel-device>` | A specific internal panel, for example `backlight-amdgpu_bl1`. |
-| `backlight` | All internal panels. |
+| `backlight` | Resolves to all enumerated internal panels in list/set/adjust/save operations; see the limitation below. |
 | `ddc-<bus>` | External display associated with the bus, for example `ddc-3`. |
-| `all` or an empty string | All devices for set/adjust/save/restore. |
+| `all` or an empty string | All devices for list/set/adjust/save/restore. |
+
+For `Brightness.Get backlight`, axctl resolves the first internal panel, but
+the value comes from `brightnessctl`'s class/default selection and is not
+guaranteed to correspond to that panel. To restore saved internal-panel values,
+use `all` (or omit the monitor) or restore each `backlight-<kernel-device>` ID;
+`restore backlight` is not a group restore.
+Although internal panels are enumerated by kernel-device name, axctl invokes
+`brightnessctl` with the `backlight` class and does not pass an individual
+device name. With multiple internal panels, per-ID selection and readback are
+therefore determined by `brightnessctl`'s default device selection and are not
+guaranteed to distinguish the panels.
 
 Exposed values are fractions from 0 to 1. Internally they are converted to
 percentages; `brightnessctl` does not go below 1% even if 0 is requested, while
@@ -174,10 +191,11 @@ available. niri honors only inhibitors attached to visible surfaces; axctl
 creates a transparent layer-shell surface for this when layer-shell is
 available.
 
-- `IdleWait`/`IsIdle`/monitors with `respect_inhibitors=true` observe session
-  idle and respect application inhibitors.
-- `InputIdleWait`/`IsInputIdle` and monitors with `respect_inhibitors=false`
-  observe physical input and ignore inhibitors.
+- `IdleWait`/`ResumeWait`/`IsIdle` and monitors with
+  `respect_inhibitors=true` observe session idle and respect application
+  inhibitors.
+- `InputIdleWait`/`InputResumeWait`/`IsInputIdle` and monitors with
+  `respect_inhibitors=false` observe physical input and ignore inhibitors.
 - `IdleMonitorCreate` is stateful and emits `Event.IdleMonitorChanged` when the
   threshold is crossed.
 - The legacy `System.IdleInhibit` method and `IdleInhibitorCreate` resources are
@@ -187,10 +205,16 @@ available.
   process inspection. Default patterns include VLC, mpv, Firefox, Chromium,
   Chrome, Brave, Vivaldi, and Steam. On Mango it also checks cached windows.
 - `MediaInhibitCheck` inspects `pactl list sink-inputs`, excludes muted/corked
-  streams and some audio services, and returns `count` and `apps`.
+  streams and some audio services, and returns distinct matching application
+  names in `apps`; `count` is the number of those names, not the number of
+  streams. If `pactl` fails or there are no matches, it returns `count: 0` and
+  `apps: null`.
 
-If the Wayland protocols could not be initialized, the daemon still starts and
-logs a warning; idle calls may return an error.
+If opening the Wayland connection for idle management fails, the daemon still
+starts and logs a warning; idle-manager RPCs, including the app/media checks and
+`System.InhibitSystem`, then return an unavailable error. If the connection
+works but an individual Wayland extension is absent, only methods requiring
+that extension fail.
 
 ## Modifier-alone binds
 
