@@ -538,13 +538,10 @@ func (s *Service) Menu(id string) (uint32, []MenuItem, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	obj := s.conn.Object(ref.Service, path)
-	call := obj.CallWithContext(ctx, menuInterface+".AboutToShow", 0, int32(0))
-	if call.Err != nil && call.Err.Error() != "" {
-		return 0, nil, call.Err
-	}
+	_ = obj.CallWithContext(ctx, menuInterface+".AboutToShow", 0, int32(0))
 	var revision uint32
 	var layout menuNode
-	call = obj.CallWithContext(ctx, menuInterface+".GetLayout", 0, int32(0), int32(-1), []string{})
+	call := obj.CallWithContext(ctx, menuInterface+".GetLayout", 0, int32(0), int32(-1), []string{})
 	if call.Err != nil {
 		return 0, nil, call.Err
 	}

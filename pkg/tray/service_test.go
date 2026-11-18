@@ -1,6 +1,7 @@
 package tray
 
 import (
+	"fmt"
 	"image/png"
 	"os"
 	"path/filepath"
@@ -92,10 +93,14 @@ func (f *fakeStatusNotifierItem) Activate(_ int32, _ int32) *dbus.Error {
 }
 
 type fakeDBusMenu struct {
-	events atomic.Int32
+	events          atomic.Int32
+	failAboutToShow atomic.Bool
 }
 
 func (m *fakeDBusMenu) AboutToShow(_ int32) (bool, *dbus.Error) {
+	if m.failAboutToShow.Load() {
+		return false, dbus.MakeFailedError(fmt.Errorf("AboutToShow failed"))
+	}
 	return false, nil
 }
 
@@ -156,6 +161,7 @@ func TestStatusNotifierWatcherRegistration(t *testing.T) {
 	}
 	menuPath := dbus.ObjectPath("/Menu")
 	fakeMenu := &fakeDBusMenu{}
+	fakeMenu.failAboutToShow.Store(true)
 	if err := client.Export(fakeMenu, menuPath, menuInterface); err != nil {
 		t.Fatal(err)
 	}
