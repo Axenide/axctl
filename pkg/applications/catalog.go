@@ -592,7 +592,7 @@ func scoreEntry(entry Entry, query string) int {
 func splitExec(value string) ([]string, error) {
 	var args []string
 	var token strings.Builder
-	quoted := false
+	var quote rune
 	escaped := false
 	started := false
 	for _, r := range value {
@@ -602,17 +602,32 @@ func splitExec(value string) ([]string, error) {
 			started = true
 			continue
 		}
+		if quote == '\'' {
+			if r == '\'' {
+				quote = 0
+				started = true
+				continue
+			}
+			token.WriteRune(r)
+			started = true
+			continue
+		}
 		if r == '\\' {
 			escaped = true
 			started = true
 			continue
 		}
-		if r == '"' {
-			quoted = !quoted
+		if r == '"' && quote == '"' {
+			quote = 0
 			started = true
 			continue
 		}
-		if (r == ' ' || r == '\t') && !quoted {
+		if (r == '"' || r == '\'') && quote == 0 {
+			quote = r
+			started = true
+			continue
+		}
+		if (r == ' ' || r == '\t') && quote == 0 {
 			if started {
 				args = append(args, token.String())
 				token.Reset()
@@ -623,7 +638,7 @@ func splitExec(value string) ([]string, error) {
 		token.WriteRune(r)
 		started = true
 	}
-	if escaped || quoted {
+	if escaped || quote != 0 {
 		return nil, fmt.Errorf("invalid desktop Exec value: unmatched quote or escape")
 	}
 	if started {

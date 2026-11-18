@@ -48,6 +48,29 @@ Exec=demo --new-window
 	}
 }
 
+func TestBottlesDesktopExecKeepsSingleQuotedArguments(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "fl-studio.desktop")
+	writeDesktopTestFile(t, path, "Name=FL Studio\nExec=bottles-cli run -p 'FL Studio' -b 'FL Studio 25' -- %u\n")
+	entry, err := parseEntry(path, "fl-studio.desktop", "C")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	wantCommand := []string{"bottles-cli", "run", "-p", "FL Studio", "-b", "FL Studio 25", "--", "%u"}
+	if !reflect.DeepEqual(entry.Command, wantCommand) {
+		t.Fatalf("entry.Command = %#v, want %#v", entry.Command, wantCommand)
+	}
+
+	argv, err := expandExec(entry.Exec, entry, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantArgv := []string{"bottles-cli", "run", "-p", "FL Studio", "-b", "FL Studio 25", "--"}
+	if !reflect.DeepEqual(argv, wantArgv) {
+		t.Fatalf("expandExec() = %#v, want %#v", argv, wantArgv)
+	}
+}
+
 func TestRefreshDesktopFilePrecedenceAndVisibility(t *testing.T) {
 	user := t.TempDir()
 	system := t.TempDir()

@@ -41,8 +41,9 @@ enumerate every icon in an icon theme.
   with the launch count.
 - `Application.Launch` attempts D-Bus activation for `DBusActivatable` entries;
   if that fails and `Exec` is present, it runs that command. RPC supports
-  desktop actions and URIs. Common field codes `%c`, `%k`, `%%`, `%f`, `%u`,
-  `%F`, `%U`, and `%i` are expanded.
+  desktop actions and URIs. Single- and double-quoted arguments are kept
+  together. Common field codes `%c`, `%k`, `%%`, `%f`, `%u`, `%F`, `%U`, and
+  `%i` are expanded.
 - If an entry requires a terminal (`Terminal=true`), `TERMINAL` must name the
   emulator; axctl adds `-e`. `HL_INITIAL_WORKSPACE_TOKEN` is removed from the
   child process environment before launch.
