@@ -101,7 +101,7 @@ and the current layout is returned. A backend may use a static list; check
 
 | Method | Parameters | Result/semantics |
 |---|---|---|
-| `Config.Get` | `{ "key": string }` | Hyprland queries the compositor. niri and Mango read supported universal appearance keys from axctl's cached state; Mango has no generic native config getter. |
+| `Config.Get` | `{ "key": string }` | Returns key-specific JSON with no common schema: Hyprland forwards its raw `j/getoption` object; niri and Mango return cached appearance-key values. Unsupported keys fail. |
 | `Config.Set` | `{ "key": string, "value": any }` | Change an option or regenerate config, depending on the backend. |
 | `Config.Batch` | `{ "configs": { "key": value, ... } }` | Apply multiple options. niri applies universal appearance settings through its cached generated config. Mango splits universal appearance settings (cached/generated config) from other settings (native runtime batch). Hyprland sends the batch to its runtime API. |
 | `Config.Apply` | `{ "payload": string }` | `payload` is a JSON string containing `ConfigUniversal`; writes generated files and reloads. |
@@ -110,7 +110,7 @@ and the current layout is returned. A backend may use a static list; check
 | `Config.UnbindKey` | `{ "mods": string, "key": string }` | Remove the keybind if supported. Mango updates generated config; niri only handles modifier-alone binds through axctl's key monitor. |
 | `Config.RawBatch` | `{ "command": string }` | Native text batch; Hyprland only. |
 | `Config.Reload` | `{}` | Reload the compositor root config; does not reread TOML. |
-| `Config.GetAnimations` | `{}` | Animation data on Hyprland; unsupported on niri and Mango. |
+| `Config.GetAnimations` | `{}` | Raw JSON from Hyprland's `j/animations` endpoint; backend-native and not normalized. Unsupported on niri and Mango. |
 
 A `Keybind` contains `modifiers: string[]`, `key`, `dispatcher`, `argument`,
 `enabled: bool`, and optional `flags`. `KeybindTarget` contains `modifiers` and
@@ -272,7 +272,7 @@ notification daemon.
 |---|---|---|
 | `Notification.List` / `Notification.History` | `{}` | `Notification[]` containing persistent history, up to 1000 entries. |
 | `Notification.Active` | `{}` | `Notification[]` of active notifications sorted by time. |
-| `Notification.Status` | `{}` | `{ "status": string }`. |
+| `Notification.Status` | `{}` | `{ "status": string }`; values are `available`, `disabled`, `conflict: <reason>`, `unavailable: <reason>`, or `stopped` before service startup. If the service is absent, the result is `unavailable`. |
 | `Notification.Send` | `NotificationSendParams` | `{ "id": uint }`. |
 | `Notification.Close` | `{ "id": uint }` | Close as requested by the user; retain history. |
 | `Notification.Dismiss` | `{ "id": uint }` | Remove from active notifications; retain history. |
@@ -352,7 +352,7 @@ service and D-Bus object path.
 | Method | Parameters | Result/semantics |
 |---|---|---|
 | `Tray.List` | `{}` | `TrayItem[]` of registered StatusNotifier items. |
-| `Tray.Status` | `{}` | `{ "status": string }`. |
+| `Tray.Status` | `{}` | `{ "status": string }`; values include `available`, `disabled`, `conflict: <reason>`, `unavailable: <reason>`, and `stopped` before service startup. If the service is absent, the result is `unavailable`. |
 | `Tray.Activate` / `Tray.SecondaryActivate` / `Tray.ContextMenu` | `{ "id": string, "x"?: int, "y"?: int }` | Invoke the item's native method. |
 | `Tray.Scroll` | `{ "id": string, "delta": int, "orientation"?: string }` | `orientation` is `horizontal` or, by default, `vertical`. |
 | `Tray.Menu` | `{ "id": string }` | `{ "revision": uint, "items": MenuItem[] }`. |

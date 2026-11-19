@@ -82,7 +82,8 @@ The daemon can act as an `org.freedesktop.Notifications` server on the session
 bus. Set `AXCTL_NOTIFICATIONS=0` to disable it. If another process already owns
 the D-Bus name, the service enters a conflict state and does not replace the
 existing owner. Query `Notification.Status` to distinguish `available`,
-`disabled`, `conflict: ...`, and `unavailable: ...`.
+`disabled`, `conflict: ...`, and `unavailable: ...`; it reports `stopped` before
+the service starts.
 
 Notifications are kept in two collections:
 
@@ -118,7 +119,9 @@ daemon, so check its status before relying on it.
 
 axctl can host the `org.kde.StatusNotifierWatcher` D-Bus watcher and register
 itself as a host. Set `AXCTL_TRAY=0` to disable it. If another watcher already
-owns the name, the tray service enters a conflict state.
+owns the name, the tray service enters a conflict state. `Tray.Status` reports
+`available`, `disabled`, `conflict: ...`, or `unavailable: ...`; before startup
+it reports `stopped`.
 
 `Tray.List` returns StatusNotifierItem metadata: ID, service, object path,
 category, title, status, icon, tooltip, and menu reference. The
