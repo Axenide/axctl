@@ -125,9 +125,9 @@ are described in [TOML configuration](configuration.md).
 |---|---|---|
 | `System.Execute` | `{ "command": string }` | Execute a command through the compositor. |
 | `System.GetCursorPosition` | `{}` | `{ "x": int, "y": int }`; not supported by every backend. |
-| `System.GetCapabilities` | `{}` | `Capabilities` object. |
+| `System.GetCapabilities` | `{}` | `{ "blur": bool, "shadows": bool, "animations": bool, "rounded_corners": bool, "workspaces_supported": bool, "windows_supported": bool }`. |
 | `System.GetCompositor` | `{}` | String: `hyprland`, `niri`, `mango`, or `unknown`. |
-| `System.KeymonStatus` | `{}` | `{open, binds, devices, errors}` status for the modifier-alone bind monitor. |
+| `System.KeymonStatus` | `{}` | `{ "open": bool, "binds": map<string, string>, "devices": string[], "errors": map<string, string> }` for the modifier-alone bind monitor. |
 | `System.SwitchKeyboardLayout` | `{ "action"?: string }` | `next`, `prev`, or an index when supported by the backend; omitted means `next`. |
 | `System.SetKeyboardLayouts` | `{ "layouts": string, "variants"?: string }` | Set comma-separated XKB layout lists when supported. |
 | `System.Exit` | `{}` | Request compositor exit. |
@@ -154,18 +154,25 @@ its Wayland idle manager.
 | `System.InputResumeWait` | `{ "timeout_ms": uint }` | Wait for physical activity to resume after idle. |
 | `System.IsInputIdle` | `{ "timeout_ms": uint }` | Returns the string `"true"` or `"false"`. |
 | `System.IsInhibited` | `{}` | Compatibility Wayland inhibitor state as a boolean string. |
-| `System.IdleMonitorCreate` | `{ "timeout_ms"?: uint, "respect_inhibitors"?: bool, "enabled"?: bool }` | Create and return monitor state. Defaults: `0`, `true`, `true`. |
-| `System.IdleMonitorUpdate` | `{ "id": uint, "timeout_ms"?: uint, "respect_inhibitors"?: bool, "enabled"?: bool }` | Update the specified fields and return full state. |
-| `System.IdleMonitorGet` | `{ "id": uint }` | Get monitor state. |
+| `System.IdleMonitorCreate` | `{ "timeout_ms"?: uint, "respect_inhibitors"?: bool, "enabled"?: bool }` | Create and return `IdleMonitorState`. Defaults: `0`, `true`, `true`. |
+| `System.IdleMonitorUpdate` | `{ "id": uint, "timeout_ms"?: uint, "respect_inhibitors"?: bool, "enabled"?: bool }` | Update the specified fields and return full `IdleMonitorState`. |
+| `System.IdleMonitorGet` | `{ "id": uint }` | Return `IdleMonitorState`. |
 | `System.IdleMonitorDestroy` | `{ "id": uint }` | Destroy the monitor. |
-| `System.IdleInhibitorCreate` | `{ "enabled"?: bool }` | Create a Wayland inhibitor; defaults to `false`; returns its state. |
-| `System.IdleInhibitorSet` | `{ "id": uint, "enabled": bool }` | Enable/disable and return state. |
-| `System.IdleInhibitorGet` | `{ "id": uint }` | Get inhibitor state. |
+| `System.IdleInhibitorCreate` | `{ "enabled"?: bool }` | Create a Wayland inhibitor; defaults to `false`; returns `IdleInhibitorState`. |
+| `System.IdleInhibitorSet` | `{ "id": uint, "enabled": bool }` | Enable/disable and return `IdleInhibitorState`. |
+| `System.IdleInhibitorGet` | `{ "id": uint }` | Return `IdleInhibitorState`. |
 | `System.IdleInhibitorDestroy` | `{ "id": uint }` | Destroy the inhibitor. |
 | `System.InhibitSystem` | `{ "on": bool }` | Start/stop `systemd-inhibit` to block system sleep/idle. |
 | `System.IsSystemInhibited` | `{}` | Returns the string `"true"` or `"false"`. |
-| `System.AppInhibitCheck` | `{ "patterns"?: string[] }` | Map of matching applications; see [Services](services.md). |
+| `System.AppInhibitCheck` | `{ "patterns"?: string[] }` | `map<string, true>` from matching application identifiers to `true`; see [Services](services.md). |
 | `System.MediaInhibitCheck` | `{}` | `{ "count": int, "apps": string[] (nullable) }` with distinct nonempty application names from sink inputs not marked muted/corked; `count` is the number of names, not streams. |
+
+`IdleMonitorState` is
+`{ "id": uint, "enabled": bool, "timeout_ms": uint, "respect_inhibitors": bool, "is_idle": bool }`.
+`IdleInhibitorState` is
+`{ "id": uint, "enabled": bool }`. `KeymonStatus.binds` maps modifier groups to
+commands; `devices` contains device paths and `errors` maps device paths to
+error strings.
 
 Monitors and inhibitors live in daemon memory. Their IDs do not survive a
 process restart.
@@ -177,12 +184,18 @@ process restart.
 | `Darkmode.On` / `Darkmode.Off` | `{}` | Set `prefer-dark` or `prefer-light` using `gsettings`. |
 | `Darkmode.Toggle` | `{}` | Toggle the current color scheme. |
 | `Darkmode.Status` | `{}` | `{ "dark": bool }`. |
-| `Brightness.List` | `{ "monitor"?: string }` | List devices or filter by ID/name. |
+| `Brightness.List` | `{ "monitor"?: string }` | `BrightnessDevice[]`, optionally filtered by ID/name. |
 | `Brightness.Get` | `{ "monitor": string }` | `{ "brightness": number }`, normalized to 0..1. |
 | `Brightness.Set` | `{ "monitor"?: string, "value": number }` | Absolute value; applies to all devices if monitor is omitted. |
 | `Brightness.Adjust` | `{ "monitor"?: string, "delta": number }` | Relative delta; applies to all devices if monitor is omitted. |
 | `Brightness.Save` | `{ "monitor"?: string }` | Save the current value; saves all devices if monitor is omitted. |
 | `Brightness.Restore` | `{ "monitor"?: string }` | Restore the saved value; restores all saved devices if monitor is omitted. |
+
+Each `BrightnessDevice` is `{ "name": string, "key"?: string, "kind":
+"brightnessctl" | "ddcutil", "bus"?: string, "brightness"?: number }`.
+`brightness` is normalized to 0..1 and is omitted when the current value cannot
+be read; `key` is the canonical monitor identifier used by
+`Event.BrightnessChanged`.
 
 `Brightness.Set` and `Brightness.Adjust` emit `Event.BrightnessChanged` for
 devices whose values could be read back.
@@ -195,18 +208,59 @@ services](services.md) for the resulting multi-panel limitation.
 
 | Method | Parameters | Result/semantics |
 |---|---|---|
-| `Application.List` | `{}` | Visible entries in the `.desktop` catalog. |
-| `Application.Top` | `{ "limit"?: int }` | Usage ranking; an omitted or non-positive limit returns all entries. |
-| `Application.Get` | `{ "id": string }` | Entry by desktop ID. |
-| `Application.Resolve` | `{ "identity": string }` | Search by ID, `StartupWMClass`, name, or executable. |
-| `Application.Search` | `{ "query": string, "limit"?: int }` | Results ranked by relevance and usage; default limit is 10. |
+| `Application.List` | `{}` | `Entry[]` of visible `.desktop` catalog entries. |
+| `Application.Top` | `{ "limit"?: int }` | `SearchResult[]` ranked by usage; an omitted or non-positive limit returns all entries. |
+| `Application.Get` | `{ "id": string }` | `Entry` by desktop ID. |
+| `Application.Resolve` | `{ "identity": string }` | `Entry` found by ID, `StartupWMClass`, name, or executable. |
+| `Application.Search` | `{ "query": string, "limit"?: int }` | `SearchResult[]` ranked by relevance and usage; an omitted or non-positive limit defaults to 10. |
 | `Application.Launch` | `{ "id": string, "actionId"?: string, "uris"?: string[] }` | Launch a desktop entry or action. |
 | `Application.RecordUsage` | `{ "id": string }` | Increment the persistent usage record. |
 | `Application.Revision` | `{}` | `{ "revision": uint }`; increases when catalog changes are detected. |
 | `Icon.Resolve` | `{ "name": string, "size"?: int, "scale"?: int }` | `{ "path": string }`; empty if not found. |
 | `Icon.ResolveMany` | `{ "names": string[], "size"?: int, "scale"?: int }` | Map of icon names to paths (missing icons map to an empty string). |
 | `Icon.Theme` | `{}` | `{ "name": string }`, the theme detected when the resolver was created. |
-| `Service.Status` | `{}` | API version and availability of compositor, applications, icons, notifications, and tray. |
+| `Service.Status` | `{}` | `{ "apiVersion": 1, "compositor": string, "applications": bool, "icons": bool, "notifications": bool, "tray": bool }`; `applications`/`icons` report initialization, while `notifications`/`tray` are true only when available. |
+
+`Entry` has this JSON shape; optional fields are omitted when empty, and false
+boolean fields are omitted:
+
+```ts
+type Entry = {
+  id: string
+  path: string
+  name: string
+  genericName?: string
+  comment?: string
+  icon?: string
+  exec?: string
+  command?: string[]
+  categories?: string[]
+  keywords?: string[]
+  mimeTypes?: string[]
+  actions?: ApplicationAction[]
+  workingDirectory?: string
+  startupWMClass?: string
+  tryExec?: string
+  dbusActivatable?: boolean
+  noDisplay?: boolean
+  hidden?: boolean
+  terminal?: boolean
+  onlyShowIn?: string[]
+  notShowIn?: string[]
+}
+
+type ApplicationAction = { id: string; name: string; exec: string }
+type SearchResult = Entry & { score: number; usageScore: number; totalScore: number }
+```
+
+`path` is the desktop-file path.
+
+`categories` is an array parsed from the `.desktop` `Categories` value, whose
+entries are separated by semicolons; empty entries are discarded. It is omitted
+when there are no categories. `SearchResult` is a flattened `Entry` with three
+additional integer fields: `score` (text relevance), `usageScore` (the decaying
+usage component), and `totalScore` (the sum used for ranking). `Top` sets
+`score` to `0` and `totalScore` equal to `usageScore`.
 
 ## Notifications
 
@@ -216,10 +270,10 @@ notification daemon.
 
 | Method | Parameters | Result/semantics |
 |---|---|---|
-| `Notification.List` / `Notification.History` | `{}` | Persistent history, up to 1000 entries. |
-| `Notification.Active` | `{}` | Active notifications sorted by time. |
+| `Notification.List` / `Notification.History` | `{}` | `Notification[]` containing persistent history, up to 1000 entries. |
+| `Notification.Active` | `{}` | `Notification[]` of active notifications sorted by time. |
 | `Notification.Status` | `{}` | `{ "status": string }`. |
-| `Notification.Send` | `{ appName?, appIcon?, summary?, body?, image?, urgency?, expireTimeout?, historyPriority?, replaceKey?, ownerToken?, popup?, actions? }` | `{ "id": uint }`. Each action is `{ "identifier": string, "text": string }`. |
+| `Notification.Send` | `NotificationSendParams` | `{ "id": uint }`. |
 | `Notification.Close` | `{ "id": uint }` | Close as requested by the user; retain history. |
 | `Notification.Dismiss` | `{ "id": uint }` | Remove from active notifications; retain history. |
 | `Notification.Delete` | `{ "id": uint }` | Close and remove from history. |
@@ -230,6 +284,25 @@ notification daemon.
 | `Notification.SetDND` | `{ "enabled": bool }` | Persist the Do Not Disturb setting. |
 | `Notification.DND` | `{}` | `{ "enabled": bool }`. |
 
+`Notification.Send` accepts:
+
+```ts
+type NotificationSendParams = {
+  appName?: string
+  appIcon?: string
+  summary?: string
+  body?: string
+  image?: string
+  urgency?: string
+  expireTimeout?: number
+  historyPriority?: number
+  replaceKey?: string
+  ownerToken?: string
+  popup?: boolean
+  actions?: { identifier: string; text: string }[]
+}
+```
+
 For `Notification.Send`, urgency accepts `low`/`0`, `normal` (the default), and
 `critical`/`2`; other strings are normalized to `normal`. `popup` defaults to
 true. A timeout of `0` disables expiration for this IPC method; a negative
@@ -238,6 +311,39 @@ value of the standard D-Bus `Notify` method, which has its own defaults.
 `historyPriority` and `ownerToken` are stored as metadata but do not currently
 affect history ordering, eviction, or ownership behavior.
 
+Notification list entries have this JSON shape. Optional fields are omitted
+when empty, or false/zero for booleans/numbers:
+
+```ts
+type Notification = {
+  id: number
+  appName: string
+  appIcon?: string
+  summary: string
+  body: string
+  image?: string
+  actions?: NotificationAction[]
+  urgency: number
+  category?: string
+  desktopEntry?: string
+  replaceKey?: string
+  ownerToken?: string
+  historyPriority?: number
+  time: number
+  timeout: number
+  resident?: boolean
+  transient?: boolean
+  popup: boolean
+}
+
+type NotificationAction = { identifier: string; text: string }
+```
+
+`time` is a Unix timestamp in milliseconds; `timeout` is a duration in
+milliseconds. The `urgency` field is a byte; standard values are `0` (low), `1`
+(normal), and `2` (critical). `Notification.Send` normalizes urgency to one of
+those three values.
+
 ## StatusNotifier tray
 
 Item IDs come from `Tray.List`; they are opaque identifiers combining the
@@ -245,16 +351,47 @@ service and D-Bus object path.
 
 | Method | Parameters | Result/semantics |
 |---|---|---|
-| `Tray.List` | `{}` | Registered StatusNotifier items. |
+| `Tray.List` | `{}` | `TrayItem[]` of registered StatusNotifier items. |
 | `Tray.Status` | `{}` | `{ "status": string }`. |
 | `Tray.Activate` / `Tray.SecondaryActivate` / `Tray.ContextMenu` | `{ "id": string, "x"?: int, "y"?: int }` | Invoke the item's native method. |
 | `Tray.Scroll` | `{ "id": string, "delta": int, "orientation"?: string }` | `orientation` is `horizontal` or, by default, `vertical`. |
 | `Tray.Menu` | `{ "id": string }` | `{ "revision": uint, "items": MenuItem[] }`. |
 | `Tray.MenuEvent` | `{ "id": string, "menuId": int, "event"?: string }` | Send a menu event; defaults to `clicked`. |
 
-`MenuItem` fields include `id`, `label`, `enabled`, `visible`, `iconName`,
-`iconData`, `type`, `toggleType`, `toggleState`, and `children`. Invisible
-items are omitted. When available, `iconData` is returned as a data URI.
+```ts
+type TrayItem = {
+  id: string
+  service: string
+  objectPath: string
+  category: string
+  title: string
+  status: string
+  iconName?: string
+  iconPath?: string
+  overlayIcon?: string
+  toolTipTitle?: string
+  toolTip?: string
+  menu?: string
+  itemIsMenu: boolean
+}
+
+type MenuItem = {
+  id: number
+  label?: string
+  enabled: boolean
+  visible: boolean
+  iconName?: string
+  iconData?: string
+  type?: string
+  toggleType?: string
+  toggleState?: number
+  children?: MenuItem[]
+}
+```
+
+Optional tray fields are omitted when empty (or when `toggleState` is zero).
+Invisible menu items are omitted. When available, `iconData` is returned as a
+data URI.
 
 ## Event subscription
 
