@@ -92,19 +92,20 @@ type menuNode struct {
 }
 
 type Service struct {
-	mu         sync.RWMutex
-	persistMu  sync.Mutex
-	conn       *dbus.Conn
-	properties *prop.Properties
-	status     string
-	items      map[string]Item
-	refs       map[string]ItemRef
-	hosts      map[string]struct{}
-	listeners  map[chan Event]struct{}
-	stop       chan struct{}
-	closed     bool
-	cacheDir   string
-	statePath  string
+	mu          sync.RWMutex
+	persistMu   sync.Mutex
+	conn        *dbus.Conn
+	properties  *prop.Properties
+	ownsWatcher bool
+	status      string
+	items       map[string]Item
+	refs        map[string]ItemRef
+	hosts       map[string]struct{}
+	listeners   map[chan Event]struct{}
+	stop        chan struct{}
+	closed      bool
+	cacheDir    string
+	statePath   string
 }
 
 func New() (*Service, error) {
@@ -143,38 +144,79 @@ func (s *Service) Start() error {
 		s.setStatus("unavailable: " + err.Error())
 		return err
 	}
-	reply, err := conn.RequestName(watcherName, dbus.NameFlagDoNotQueue)
+	props, err := s.exportWatcher(conn)
 	if err != nil {
 		conn.Close()
+		s.setStatus("unavailable: " + err.Error())
+		return err
+	}
+	ch := make(chan *dbus.Signal, 128)
+	conn.Signal(ch)
+	if err := conn.AddMatchSignal(
+		dbus.WithMatchInterface("org.freedesktop.DBus"),
+		dbus.WithMatchMember("NameOwnerChanged"),
+	); err != nil {
+		conn.RemoveSignal(ch)
+		s.unexportWatcher(conn)
+		conn.Close()
+		s.setStatus("unavailable: " + err.Error())
+		return err
+	}
+	s.mu.Lock()
+	s.conn = conn
+	s.properties = props
+	s.mu.Unlock()
+	reply, err := conn.RequestName(watcherName, dbus.NameFlagDoNotQueue)
+	if err != nil {
+		conn.RemoveSignal(ch)
+		s.unexportWatcher(conn)
+		conn.Close()
+		s.mu.Lock()
+		s.conn = nil
+		s.properties = nil
+		s.mu.Unlock()
 		s.setStatus("unavailable: " + err.Error())
 		return err
 	}
 	if reply != dbus.RequestNameReplyPrimaryOwner {
+		conn.RemoveSignal(ch)
+		s.unexportWatcher(conn)
 		conn.Close()
+		s.mu.Lock()
+		s.conn = nil
+		s.properties = nil
+		s.mu.Unlock()
 		err = fmt.Errorf("D-Bus name %s is already owned", watcherName)
 		s.setStatus("conflict: " + err.Error())
 		return err
 	}
-	if err := conn.Export(s, watcherPath, watcherInterface); err != nil {
-		_, _ = conn.ReleaseName(watcherName)
-		conn.Close()
-		s.setStatus("unavailable: " + err.Error())
-		return err
+	s.mu.Lock()
+	s.ownsWatcher = true
+	s.status = "available"
+	s.mu.Unlock()
+	uniqueName := string(conn.Names()[0])
+	if call := conn.Object(watcherName, watcherPath).Call(watcherInterface+".RegisterStatusNotifierHost", 0, uniqueName); call.Err != nil {
+		fmt.Fprintf(os.Stderr, "[tray] register host: %v\n", call.Err)
 	}
-	registeredItems := []string{}
+	go s.signalLoop(ch)
+	s.restoreItems()
+	return nil
+}
+
+func (s *Service) exportWatcher(conn *dbus.Conn) (*prop.Properties, error) {
+	if err := conn.Export(s, watcherPath, watcherInterface); err != nil {
+		return nil, err
+	}
 	props, err := prop.Export(conn, watcherPath, prop.Map{
 		watcherInterface: {
-			"RegisteredStatusNotifierItems":  &prop.Prop{Value: registeredItems, Emit: prop.EmitTrue},
-			"IsStatusNotifierHostRegistered": &prop.Prop{Value: false, Emit: prop.EmitTrue},
+			"RegisteredStatusNotifierItems":  &prop.Prop{Value: []string{}, Emit: prop.EmitTrue},
+			"IsStatusNotifierHostRegistered": &prop.Prop{Value: true, Emit: prop.EmitTrue},
 			"ProtocolVersion":                &prop.Prop{Value: int32(0), Emit: prop.EmitConst},
 		},
 	})
 	if err != nil {
-		conn.Export(nil, watcherPath, watcherInterface)
-		_, _ = conn.ReleaseName(watcherName)
-		conn.Close()
-		s.setStatus("unavailable: " + err.Error())
-		return err
+		s.unexportWatcher(conn)
+		return nil, err
 	}
 	introspection := introspect.NewIntrospectable(&introspect.Node{
 		Name: string(watcherPath),
@@ -195,35 +237,16 @@ func (s *Service) Start() error {
 		}, prop.IntrospectData},
 	})
 	if err := conn.Export(introspection, watcherPath, "org.freedesktop.DBus.Introspectable"); err != nil {
-		conn.Export(nil, watcherPath, watcherInterface)
-		_, _ = conn.ReleaseName(watcherName)
-		conn.Close()
-		s.setStatus("unavailable: " + err.Error())
-		return err
+		s.unexportWatcher(conn)
+		return nil, err
 	}
-	ch := make(chan *dbus.Signal, 128)
-	conn.Signal(ch)
-	if err := conn.AddMatchSignal(
-		dbus.WithMatchInterface("org.freedesktop.DBus"),
-		dbus.WithMatchMember("NameOwnerChanged"),
-	); err != nil {
-		conn.RemoveSignal(ch)
-		conn.Close()
-		s.setStatus("unavailable: " + err.Error())
-		return err
-	}
-	s.mu.Lock()
-	s.conn = conn
-	s.properties = props
-	s.status = "available"
-	s.mu.Unlock()
-	uniqueName := string(conn.Names()[0])
-	if call := conn.Object(watcherName, watcherPath).Call(watcherInterface+".RegisterStatusNotifierHost", 0, uniqueName); call.Err != nil {
-		fmt.Fprintf(os.Stderr, "[tray] register host: %v\n", call.Err)
-	}
-	go s.signalLoop(ch)
-	s.restoreItems()
-	return nil
+	return props, nil
+}
+
+func (s *Service) unexportWatcher(conn *dbus.Conn) {
+	conn.Export(nil, watcherPath, watcherInterface)
+	conn.Export(nil, watcherPath, "org.freedesktop.DBus.Properties")
+	conn.Export(nil, watcherPath, "org.freedesktop.DBus.Introspectable")
 }
 
 func (s *Service) Close() error {
@@ -235,6 +258,7 @@ func (s *Service) Close() error {
 	s.closed = true
 	close(s.stop)
 	conn := s.conn
+	ownsWatcher := s.ownsWatcher
 	listeners := make([]chan Event, 0, len(s.listeners))
 	for listener := range s.listeners {
 		listeners = append(listeners, listener)
@@ -250,7 +274,9 @@ func (s *Service) Close() error {
 	if err := s.persistRefs(); err != nil {
 		fmt.Fprintf(os.Stderr, "[tray] persist registrations: %v\n", err)
 	}
-	_, _ = conn.ReleaseName(watcherName)
+	if ownsWatcher {
+		_, _ = conn.ReleaseName(watcherName)
+	}
 	return conn.Close()
 }
 
@@ -476,12 +502,9 @@ func (s *Service) RegisterStatusNotifierHost(sender dbus.Sender, service string)
 	s.mu.Lock()
 	s.hosts[name] = struct{}{}
 	first := len(s.hosts) == 1
-	props := s.properties
 	conn := s.conn
 	s.mu.Unlock()
-	if props != nil {
-		props.SetMust(watcherInterface, "IsStatusNotifierHostRegistered", true)
-	}
+	s.updateHostRegisteredProperty()
 	if first && conn != nil {
 		_ = conn.Emit(watcherPath, watcherInterface+".StatusNotifierHostRegistered")
 	}
@@ -489,9 +512,7 @@ func (s *Service) RegisterStatusNotifierHost(sender dbus.Sender, service string)
 }
 
 func (s *Service) IsStatusNotifierHostRegistered() (bool, *dbus.Error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return len(s.hosts) > 0, nil
+	return true, nil
 }
 
 func (s *Service) RegisteredStatusNotifierItems() ([]string, *dbus.Error) {
@@ -806,12 +827,9 @@ func (s *Service) removeOwner(owner string) {
 	s.mu.Lock()
 	delete(s.hosts, owner)
 	last := len(s.hosts) == 0
-	props := s.properties
 	conn := s.conn
 	s.mu.Unlock()
-	if props != nil {
-		props.SetMust(watcherInterface, "IsStatusNotifierHostRegistered", !last)
-	}
+	s.updateHostRegisteredProperty()
 	if last && conn != nil {
 		_ = conn.Emit(watcherPath, watcherInterface+".StatusNotifierHostUnregistered")
 	}
@@ -828,10 +846,17 @@ func (s *Service) registeredItemsLocked() []string {
 
 func (s *Service) updateWatcherProperties(items []string) {
 	s.mu.RLock()
-	props := s.properties
-	s.mu.RUnlock()
-	if props != nil {
+	defer s.mu.RUnlock()
+	if props := s.properties; props != nil && !s.closed {
 		props.SetMust(watcherInterface, "RegisteredStatusNotifierItems", items)
+	}
+}
+
+func (s *Service) updateHostRegisteredProperty() {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if props := s.properties; props != nil && !s.closed {
+		props.SetMust(watcherInterface, "IsStatusNotifierHostRegistered", true)
 	}
 }
 

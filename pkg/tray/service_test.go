@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/godbus/dbus/v5"
 	"github.com/godbus/dbus/v5/prop"
@@ -92,6 +93,111 @@ func (f *fakeStatusNotifierItem) Activate(_ int32, _ int32) *dbus.Error {
 	return nil
 }
 
+func findItemByTitle(items []Item, title string) (Item, bool) {
+	for _, item := range items {
+		if item.Title == title {
+			return item, true
+		}
+	}
+	return Item{}, false
+}
+
+func TestStatusNotifierWatcherReadyBeforeNameOwnership(t *testing.T) {
+	t.Setenv("AXCTL_TRAY", "1")
+	tempDir := t.TempDir()
+	t.Setenv("XDG_RUNTIME_DIR", filepath.Join(tempDir, "runtime"))
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(tempDir, "cache"))
+	service, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close()
+
+	client, err := dbus.ConnectSessionBus()
+	if err != nil {
+		t.Skipf("session D-Bus is unavailable: %v", err)
+	}
+	defer client.Close()
+	itemPath := dbus.ObjectPath("/StatusNotifierItem")
+	if err := client.Export(&fakeStatusNotifierItem{}, itemPath, itemInterface); err != nil {
+		t.Fatal(err)
+	}
+	_, err = prop.Export(client, itemPath, prop.Map{itemInterface: {
+		"Category": &prop.Prop{Value: "ApplicationStatus", Emit: prop.EmitTrue},
+		"Id":       &prop.Prop{Value: "early-item", Emit: prop.EmitTrue},
+		"Title":    &prop.Prop{Value: "Early Item", Emit: prop.EmitTrue},
+		"Status":   &prop.Prop{Value: "Active", Emit: prop.EmitTrue},
+		"IconName": &prop.Prop{Value: "early-icon", Emit: prop.EmitTrue},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	signals := make(chan *dbus.Signal, 8)
+	client.Signal(signals)
+	if err := client.AddMatchSignal(
+		dbus.WithMatchInterface("org.freedesktop.DBus"),
+		dbus.WithMatchMember("NameOwnerChanged"),
+	); err != nil {
+		t.Fatal(err)
+	}
+	defer client.RemoveSignal(signals)
+	startDone := make(chan error, 1)
+	go func() { startDone <- service.Start() }()
+
+	deadline := time.NewTimer(3 * time.Second)
+	defer deadline.Stop()
+	started := false
+waitForOwner:
+	for {
+		select {
+		case signal := <-signals:
+			if signal == nil || signal.Name != "org.freedesktop.DBus.NameOwnerChanged" || len(signal.Body) < 3 {
+				continue
+			}
+			name, _ := signal.Body[0].(string)
+			newOwner, _ := signal.Body[2].(string)
+			if name == watcherName && newOwner != "" {
+				break waitForOwner
+			}
+		case err := <-startDone:
+			if err != nil {
+				t.Skipf("StatusNotifier watcher is unavailable: %v", err)
+			}
+			startDone = nil
+			started = true
+		case <-deadline.C:
+			t.Fatal("timed out waiting for the watcher to acquire its D-Bus name")
+		}
+	}
+
+	var hostRegistered dbus.Variant
+	call := client.Object(watcherName, watcherPath).Call("org.freedesktop.DBus.Properties.Get", 0, watcherInterface, "IsStatusNotifierHostRegistered")
+	if call.Err != nil || call.Store(&hostRegistered) != nil {
+		t.Fatalf("read host registration property: %v", call.Err)
+	}
+	if got, ok := hostRegistered.Value().(bool); !ok || !got {
+		t.Fatalf("IsStatusNotifierHostRegistered = %v, want true", hostRegistered.Value())
+	}
+	if call := client.Object(watcherName, watcherPath).Call(watcherInterface+".RegisterStatusNotifierItem", 0, string(itemPath)); call.Err != nil {
+		t.Fatalf("register item immediately after watcher startup: %v", call.Err)
+	}
+	if !started {
+		select {
+		case err := <-startDone:
+			if err != nil {
+				t.Fatal(err)
+			}
+		case <-deadline.C:
+			t.Fatal("timed out waiting for tray service startup")
+		}
+	}
+	items := service.List()
+	if _, ok := findItemByTitle(items, "Early Item"); !ok {
+		t.Fatalf("registered items = %#v", items)
+	}
+}
+
 type fakeDBusMenu struct {
 	events          atomic.Int32
 	failAboutToShow atomic.Bool
@@ -170,23 +276,24 @@ func TestStatusNotifierWatcherRegistration(t *testing.T) {
 		t.Fatal(err)
 	}
 	items := service.List()
-	if len(items) != 1 || items[0].Title != "Fake Item" || items[0].IconName != "fake-icon" {
+	item, ok := findItemByTitle(items, "Fake Item")
+	if !ok || item.IconName != "fake-icon" {
 		t.Fatalf("registered items = %#v", items)
 	}
-	if err := service.Activate(items[0].ID, 0, 0); err != nil {
+	if err := service.Activate(item.ID, 0, 0); err != nil {
 		t.Fatal(err)
 	}
 	if fake.activated.Load() != 1 {
 		t.Fatalf("Activate called %d times", fake.activated.Load())
 	}
-	_, menuItems, err := service.Menu(items[0].ID)
+	_, menuItems, err := service.Menu(item.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(menuItems) != 1 || menuItems[0].Label != "Open" {
 		t.Fatalf("menu items = %#v", menuItems)
 	}
-	if err := service.MenuEvent(items[0].ID, menuItems[0].ID, "clicked"); err != nil {
+	if err := service.MenuEvent(item.ID, menuItems[0].ID, "clicked"); err != nil {
 		t.Fatal(err)
 	}
 	if fakeMenu.events.Load() != 1 {
@@ -205,7 +312,8 @@ func TestStatusNotifierWatcherRegistration(t *testing.T) {
 	}
 	defer restarted.Close()
 	restoredItems := restarted.List()
-	if len(restoredItems) != 1 || restoredItems[0].ID != items[0].ID || restoredItems[0].Title != "Fake Item" {
+	restored, ok := findItemByTitle(restoredItems, "Fake Item")
+	if !ok || restored.ID != item.ID {
 		t.Fatalf("restored items = %#v", restoredItems)
 	}
 }
