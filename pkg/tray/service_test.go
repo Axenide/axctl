@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/godbus/dbus/v5"
+	"github.com/godbus/dbus/v5/introspect"
 	"github.com/godbus/dbus/v5/prop"
 )
 
@@ -192,6 +193,99 @@ func waitForWatcherOwner(t *testing.T, conn *dbus.Conn, want string) {
 		case <-timeout.C:
 			t.Fatalf("StatusNotifier watcher owner did not become %q", want)
 		}
+	}
+}
+
+func exportTestStatusNotifierItem(t *testing.T, conn *dbus.Conn, path dbus.ObjectPath, title string) {
+	t.Helper()
+	if err := conn.Export(&fakeStatusNotifierItem{}, path, itemInterface); err != nil {
+		t.Fatal(err)
+	}
+	_, err := prop.Export(conn, path, prop.Map{itemInterface: {
+		"Category": &prop.Prop{Value: "ApplicationStatus", Emit: prop.EmitTrue},
+		"Id":       &prop.Prop{Value: title, Emit: prop.EmitTrue},
+		"Title":    &prop.Prop{Value: title, Emit: prop.EmitTrue},
+		"Status":   &prop.Prop{Value: "Active", Emit: prop.EmitTrue},
+		"IconName": &prop.Prop{Value: "test-icon", Emit: prop.EmitTrue},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRescanFindsItemsOnNonstandardPaths(t *testing.T) {
+	t.Setenv("XDG_RUNTIME_DIR", filepath.Join(t.TempDir(), "runtime"))
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	itemConn, err := dbus.ConnectSessionBus()
+	if err != nil {
+		t.Skipf("session D-Bus is unavailable: %v", err)
+	}
+	defer itemConn.Close()
+	itemPath := dbus.ObjectPath("/com/example/tray/StatusNotifierItem")
+	exportTestStatusNotifierItem(t, itemConn, itemPath, "Nonstandard Rescan Item")
+	introspection := []struct {
+		path dbus.ObjectPath
+		node *introspect.Node
+	}{
+		{path: "/", node: &introspect.Node{Name: "/", Children: []introspect.Node{{Name: "com"}}}},
+		{path: "/com", node: &introspect.Node{Name: "/com", Children: []introspect.Node{{Name: "example"}}}},
+		{path: "/com/example", node: &introspect.Node{Name: "/com/example", Children: []introspect.Node{{Name: "tray"}}}},
+		{path: "/com/example/tray", node: &introspect.Node{Name: "/com/example/tray", Children: []introspect.Node{{Name: "StatusNotifierItem"}}}},
+		{path: itemPath, node: &introspect.Node{Name: string(itemPath), Interfaces: []introspect.Interface{{Name: itemInterface}}}},
+	}
+	for _, entry := range introspection {
+		if err := itemConn.Export(introspect.NewIntrospectable(entry.node), entry.path, "org.freedesktop.DBus.Introspectable"); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	scanConn, err := dbus.ConnectSessionBus()
+	if err != nil {
+		t.Fatal(err)
+	}
+	service, err := New()
+	if err != nil {
+		scanConn.Close()
+		t.Fatal(err)
+	}
+	service.conn = scanConn
+	defer service.Close()
+	registered, err := service.Rescan()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if registered < 1 {
+		t.Fatalf("Rescan registered %d items, want at least one", registered)
+	}
+	item := waitForItemByTitle(t, service, "Nonstandard Rescan Item")
+	if item.ID != string(itemConn.Names()[0])+string(itemPath) {
+		t.Fatalf("rescanned item ID = %q, want %q", item.ID, string(itemConn.Names()[0])+string(itemPath))
+	}
+}
+
+func TestStartRescansUnregisteredItem(t *testing.T) {
+	t.Setenv("AXCTL_TRAY", "1")
+	t.Setenv("XDG_RUNTIME_DIR", filepath.Join(t.TempDir(), "runtime"))
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	itemConn, err := dbus.ConnectSessionBus()
+	if err != nil {
+		t.Skipf("session D-Bus is unavailable: %v", err)
+	}
+	defer itemConn.Close()
+	itemPath := dbus.ObjectPath("/StatusNotifierItem")
+	exportTestStatusNotifierItem(t, itemConn, itemPath, "Startup Rescan Item")
+
+	service, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.Start(); err != nil {
+		t.Skipf("tray service is unavailable: %v", err)
+	}
+	defer service.Close()
+	item := waitForItemByTitle(t, service, "Startup Rescan Item")
+	if item.ID != string(itemConn.Names()[0])+string(itemPath) {
+		t.Fatalf("rescanned item ID = %q, want %q", item.ID, string(itemConn.Names()[0])+string(itemPath))
 	}
 }
 

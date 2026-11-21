@@ -207,6 +207,7 @@ func (s *Service) Start() error {
 		go s.signalLoop(ch)
 		s.registerAsHost(owner)
 		s.syncWatcherItems(owner)
+		go s.rescanInBackground()
 		return nil
 	}
 	s.mu.Lock()
@@ -217,6 +218,7 @@ func (s *Service) Start() error {
 	go s.signalLoop(ch)
 	s.registerAsHost(watcherName)
 	s.restoreItems()
+	go s.rescanInBackground()
 	return nil
 }
 
@@ -360,12 +362,18 @@ func (s *Service) trackExistingItem(address string) bool {
 func (s *Service) trackResolvedItem(ref ItemRef) bool {
 	id := itemID(ref)
 	s.mu.RLock()
-	_, exists := s.refs[id]
-	_, loaded := s.items[id]
+	existingID := ""
+	for candidate, existing := range s.refs {
+		if candidate == id || existing.Owner == ref.Owner && existing.Path == ref.Path {
+			existingID = candidate
+			break
+		}
+	}
+	_, loaded := s.items[existingID]
 	s.mu.RUnlock()
-	if exists {
+	if existingID != "" {
 		if !loaded {
-			s.refreshItemAsync(id)
+			s.refreshItemAsync(existingID)
 		}
 		return false
 	}
@@ -373,9 +381,15 @@ func (s *Service) trackResolvedItem(ref ItemRef) bool {
 		fmt.Fprintf(os.Stderr, "[tray] watch existing item %s: %v\n", id, err)
 	}
 	s.mu.Lock()
-	if _, exists := s.refs[id]; exists {
+	if s.closed {
 		s.mu.Unlock()
 		return false
+	}
+	for candidate, existing := range s.refs {
+		if candidate == id || existing.Owner == ref.Owner && existing.Path == ref.Path {
+			s.mu.Unlock()
+			return false
+		}
 	}
 	s.refs[id] = ref
 	s.mu.Unlock()
@@ -868,6 +882,13 @@ func (s *Service) handleWatcherOwnerChanged(newOwner string) {
 	if newOwner == self {
 		if ownsWatcher && currentOwner == self {
 			return
+		}
+		if currentOwner != "" && currentOwner != self {
+			_ = conn.RemoveMatchSignal(
+				dbus.WithMatchSender(currentOwner),
+				dbus.WithMatchObjectPath(watcherPath),
+				dbus.WithMatchInterface(watcherInterface),
+			)
 		}
 		s.mu.Lock()
 		s.ownsWatcher = true

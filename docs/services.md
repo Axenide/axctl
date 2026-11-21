@@ -147,6 +147,8 @@ format, converted to PNG, and cached in `$XDG_CACHE_HOME/axctl/tray` or
 `$XDG_CACHE_HOME/axctl/tray/registrations.json` (defaulting to
 `~/.cache/axctl/tray/registrations.json`). A daemon restart can re-query items
 whose owning applications are still running; stale references are discarded.
+At startup, axctl also scans live session-bus objects for StatusNotifierItems
+that are still published but are not registered with the active watcher.
 The tray RPC API has no CLI subcommands; use the methods described in the
 [IPC API](ipc-api.md).
 
