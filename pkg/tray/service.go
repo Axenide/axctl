@@ -293,16 +293,10 @@ func (s *Service) restoreItems() {
 		fmt.Fprintf(os.Stderr, "[tray] decode registrations: %v\n", err)
 		return
 	}
-	restored := false
 	for _, ref := range refs {
-		if s.restoreItem(ref) {
-			restored = true
-		}
+		s.restoreItem(ref)
 	}
 	s.updateWatcherProperties(s.registeredItems())
-	if restored {
-		s.publish(Event{Type: "changed", Items: s.List()})
-	}
 	if err := s.persistRefs(); err != nil {
 		fmt.Fprintf(os.Stderr, "[tray] persist registrations: %v\n", err)
 	}
@@ -316,8 +310,11 @@ func (s *Service) restoreItem(ref ItemRef) bool {
 	s.mu.RLock()
 	_, exists := s.refs[id]
 	s.mu.RUnlock()
-	if exists || s.watchItem(ref) != nil {
+	if exists {
 		return false
+	}
+	if err := s.watchItem(ref); err != nil {
+		fmt.Fprintf(os.Stderr, "[tray] watch restored item %s: %v\n", id, err)
 	}
 	s.mu.Lock()
 	if _, exists := s.refs[id]; exists {
@@ -326,13 +323,11 @@ func (s *Service) restoreItem(ref ItemRef) bool {
 	}
 	s.refs[id] = ref
 	s.mu.Unlock()
-	if err := s.refreshItem(id); err != nil {
-		s.removeItem(id, false)
-		return false
-	}
+	s.updateWatcherProperties(s.registeredItems())
 	if conn := s.conn; conn != nil {
 		_ = conn.Emit(watcherPath, watcherInterface+".StatusNotifierItemRegistered", itemAddress(ref))
 	}
+	s.refreshItemAsync(id)
 	return true
 }
 
@@ -468,30 +463,36 @@ func (s *Service) RegisterStatusNotifierItem(sender dbus.Sender, service string)
 	s.refs[id] = ref
 	s.mu.Unlock()
 	if err := s.watchItem(ref); err != nil {
-		s.removeItem(id, false)
-		return dbus.MakeFailedError(err)
+		fmt.Fprintf(os.Stderr, "[tray] watch item %s: %v\n", id, err)
 	}
-	if err := s.refreshItem(id); err != nil {
-		s.removeItem(id, false)
-		return dbus.MakeFailedError(err)
-	}
+	s.updateWatcherProperties(s.registeredItems())
 	s.mu.RLock()
 	conn := s.conn
-	items := s.registeredItemsLocked()
-	item := s.items[id]
 	s.mu.RUnlock()
 	if conn != nil {
 		_ = conn.Emit(watcherPath, watcherInterface+".StatusNotifierItemRegistered", itemAddress(ref))
 	}
-	s.updateWatcherProperties(items)
-	s.publish(Event{Type: "changed", Items: s.List()})
 	if err := s.persistRefs(); err != nil {
 		fmt.Fprintf(os.Stderr, "[tray] persist registrations: %v\n", err)
 	}
-	if item.ID == "" {
-		return dbus.MakeFailedError(fmt.Errorf("status notifier item did not publish properties"))
-	}
+	s.refreshItemAsync(id)
 	return nil
+}
+
+func (s *Service) refreshItemAsync(id string) {
+	go func() {
+		for attempt := 0; attempt < 3; attempt++ {
+			if err := s.refreshItem(id); err == nil {
+				s.publish(Event{Type: "changed", Items: s.List()})
+				return
+			} else if attempt == 2 {
+				fmt.Fprintf(os.Stderr, "[tray] read item %s: %v\n", id, err)
+				return
+			} else {
+				time.Sleep(time.Duration(attempt+1) * 100 * time.Millisecond)
+			}
+		}
+	}()
 }
 
 func (s *Service) RegisterStatusNotifierHost(sender dbus.Sender, service string) *dbus.Error {
@@ -709,6 +710,10 @@ func (s *Service) refreshItem(id string) error {
 		item.Title = variantString(values["Id"], id)
 	}
 	s.mu.Lock()
+	if _, exists := s.refs[id]; !exists {
+		s.mu.Unlock()
+		return fmt.Errorf("tray item %q was removed", id)
+	}
 	s.items[id] = item
 	s.mu.Unlock()
 	return nil

@@ -102,6 +102,24 @@ func findItemByTitle(items []Item, title string) (Item, bool) {
 	return Item{}, false
 }
 
+func waitForItemByTitle(t *testing.T, service *Service, title string) Item {
+	t.Helper()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	timeout := time.NewTimer(3 * time.Second)
+	defer timeout.Stop()
+	for {
+		if item, ok := findItemByTitle(service.List(), title); ok {
+			return item
+		}
+		select {
+		case <-ticker.C:
+		case <-timeout.C:
+			t.Fatalf("tray item %q was not loaded", title)
+		}
+	}
+}
+
 func TestStatusNotifierWatcherReadyBeforeNameOwnership(t *testing.T) {
 	t.Setenv("AXCTL_TRAY", "1")
 	tempDir := t.TempDir()
@@ -182,6 +200,24 @@ waitForOwner:
 	if call := client.Object(watcherName, watcherPath).Call(watcherInterface+".RegisterStatusNotifierItem", 0, string(itemPath)); call.Err != nil {
 		t.Fatalf("register item immediately after watcher startup: %v", call.Err)
 	}
+	missingPath := dbus.ObjectPath("/MissingStatusNotifierItem")
+	if call := client.Object(watcherName, watcherPath).Call(watcherInterface+".RegisterStatusNotifierItem", 0, string(missingPath)); call.Err != nil {
+		t.Fatalf("accept item before its properties are available: %v", call.Err)
+	}
+	registeredItems, dbusErr := service.RegisteredStatusNotifierItems()
+	if dbusErr != nil {
+		t.Fatal(dbusErr)
+	}
+	registered := false
+	for _, address := range registeredItems {
+		if address == string(client.Names()[0])+string(missingPath) {
+			registered = true
+			break
+		}
+	}
+	if !registered {
+		t.Fatalf("missing item was not retained in watcher registrations: %#v", registeredItems)
+	}
 	if !started {
 		select {
 		case err := <-startDone:
@@ -192,10 +228,7 @@ waitForOwner:
 			t.Fatal("timed out waiting for tray service startup")
 		}
 	}
-	items := service.List()
-	if _, ok := findItemByTitle(items, "Early Item"); !ok {
-		t.Fatalf("registered items = %#v", items)
-	}
+	waitForItemByTitle(t, service, "Early Item")
 }
 
 type fakeDBusMenu struct {
@@ -275,10 +308,9 @@ func TestStatusNotifierWatcherRegistration(t *testing.T) {
 	if err := watcher.Call(watcherInterface+".RegisterStatusNotifierItem", 0, string(itemPath)).Err; err != nil {
 		t.Fatal(err)
 	}
-	items := service.List()
-	item, ok := findItemByTitle(items, "Fake Item")
-	if !ok || item.IconName != "fake-icon" {
-		t.Fatalf("registered items = %#v", items)
+	item := waitForItemByTitle(t, service, "Fake Item")
+	if item.IconName != "fake-icon" {
+		t.Fatalf("registered item = %#v", item)
 	}
 	if err := service.Activate(item.ID, 0, 0); err != nil {
 		t.Fatal(err)
@@ -311,9 +343,8 @@ func TestStatusNotifierWatcherRegistration(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer restarted.Close()
-	restoredItems := restarted.List()
-	restored, ok := findItemByTitle(restoredItems, "Fake Item")
-	if !ok || restored.ID != item.ID {
-		t.Fatalf("restored items = %#v", restoredItems)
+	restored := waitForItemByTitle(t, restarted, "Fake Item")
+	if restored.ID != item.ID {
+		t.Fatalf("restored item = %#v, want ID %q", restored, item.ID)
 	}
 }

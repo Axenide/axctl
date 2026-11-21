@@ -133,6 +133,11 @@ forward the operation to the item owner. `Tray.Menu` requests the current
 D-BusMenu layout, and `Tray.MenuEvent` sends an interaction. Items are removed
 when D-Bus owner changes indicate they have disappeared.
 
+The watcher acknowledges an item registration without waiting for its
+properties. axctl loads the item metadata asynchronously and retries temporary
+property-read failures, so an item can appear in `Tray.List` shortly after its
+application registers it.
+
 Received pixmaps are decoded from the specification's network-order ARGB32
 format, converted to PNG, and cached in `$XDG_CACHE_HOME/axctl/tray` or
 `~/.cache/axctl/tray`. Registered D-Bus item references are cached in
