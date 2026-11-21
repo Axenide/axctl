@@ -92,20 +92,21 @@ type menuNode struct {
 }
 
 type Service struct {
-	mu          sync.RWMutex
-	persistMu   sync.Mutex
-	conn        *dbus.Conn
-	properties  *prop.Properties
-	ownsWatcher bool
-	status      string
-	items       map[string]Item
-	refs        map[string]ItemRef
-	hosts       map[string]struct{}
-	listeners   map[chan Event]struct{}
-	stop        chan struct{}
-	closed      bool
-	cacheDir    string
-	statePath   string
+	mu           sync.RWMutex
+	persistMu    sync.Mutex
+	conn         *dbus.Conn
+	properties   *prop.Properties
+	ownsWatcher  bool
+	watcherOwner string
+	status       string
+	items        map[string]Item
+	refs         map[string]ItemRef
+	hosts        map[string]struct{}
+	listeners    map[chan Event]struct{}
+	stop         chan struct{}
+	closed       bool
+	cacheDir     string
+	statePath    string
 }
 
 func New() (*Service, error) {
@@ -179,26 +180,42 @@ func (s *Service) Start() error {
 		return err
 	}
 	if reply != dbus.RequestNameReplyPrimaryOwner {
-		conn.RemoveSignal(ch)
-		s.unexportWatcher(conn)
-		conn.Close()
+		owner, ownerErr := s.nameOwner(watcherName)
+		if ownerErr != nil || owner == "" {
+			conn.RemoveSignal(ch)
+			s.unexportWatcher(conn)
+			conn.Close()
+			s.mu.Lock()
+			s.conn = nil
+			s.properties = nil
+			s.mu.Unlock()
+			if ownerErr != nil {
+				err = ownerErr
+			} else {
+				err = fmt.Errorf("D-Bus name %s has no owner", watcherName)
+			}
+			s.setStatus("conflict: " + err.Error())
+			return err
+		}
+		if matchErr := s.watchWatcher(owner); matchErr != nil {
+			fmt.Fprintf(os.Stderr, "[tray] watch existing watcher: %v\n", matchErr)
+		}
 		s.mu.Lock()
-		s.conn = nil
-		s.properties = nil
+		s.watcherOwner = owner
+		s.status = "available"
 		s.mu.Unlock()
-		err = fmt.Errorf("D-Bus name %s is already owned", watcherName)
-		s.setStatus("conflict: " + err.Error())
-		return err
+		go s.signalLoop(ch)
+		s.registerAsHost(owner)
+		s.syncWatcherItems(owner)
+		return nil
 	}
 	s.mu.Lock()
 	s.ownsWatcher = true
+	s.watcherOwner = string(conn.Names()[0])
 	s.status = "available"
 	s.mu.Unlock()
-	uniqueName := string(conn.Names()[0])
-	if call := conn.Object(watcherName, watcherPath).Call(watcherInterface+".RegisterStatusNotifierHost", 0, uniqueName); call.Err != nil {
-		fmt.Fprintf(os.Stderr, "[tray] register host: %v\n", call.Err)
-	}
 	go s.signalLoop(ch)
+	s.registerAsHost(watcherName)
 	s.restoreItems()
 	return nil
 }
@@ -247,6 +264,162 @@ func (s *Service) unexportWatcher(conn *dbus.Conn) {
 	conn.Export(nil, watcherPath, watcherInterface)
 	conn.Export(nil, watcherPath, "org.freedesktop.DBus.Properties")
 	conn.Export(nil, watcherPath, "org.freedesktop.DBus.Introspectable")
+}
+
+func (s *Service) nameOwner(name string) (string, error) {
+	s.mu.RLock()
+	conn := s.conn
+	s.mu.RUnlock()
+	if conn == nil {
+		return "", fmt.Errorf("tray watcher is not connected")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	call := conn.BusObject().CallWithContext(ctx, "org.freedesktop.DBus.GetNameOwner", 0, name)
+	if call.Err != nil {
+		return "", call.Err
+	}
+	var owner string
+	if err := call.Store(&owner); err != nil {
+		return "", err
+	}
+	return owner, nil
+}
+
+func (s *Service) watchWatcher(owner string) error {
+	s.mu.RLock()
+	conn := s.conn
+	s.mu.RUnlock()
+	if conn == nil {
+		return fmt.Errorf("tray watcher is not connected")
+	}
+	return conn.AddMatchSignal(
+		dbus.WithMatchSender(owner),
+		dbus.WithMatchObjectPath(watcherPath),
+		dbus.WithMatchInterface(watcherInterface),
+	)
+}
+
+func (s *Service) registerAsHost(destination string) {
+	s.mu.RLock()
+	conn := s.conn
+	s.mu.RUnlock()
+	if conn == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	call := conn.Object(destination, watcherPath).CallWithContext(ctx, watcherInterface+".RegisterStatusNotifierHost", 0, string(conn.Names()[0]))
+	if call.Err != nil {
+		fmt.Fprintf(os.Stderr, "[tray] register host with %s: %v\n", destination, call.Err)
+	}
+}
+
+func (s *Service) syncWatcherItems(owner string) int {
+	s.mu.RLock()
+	conn := s.conn
+	s.mu.RUnlock()
+	if conn == nil {
+		return 0
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	var value dbus.Variant
+	call := conn.Object(owner, watcherPath).CallWithContext(ctx, "org.freedesktop.DBus.Properties.Get", 0, watcherInterface, "RegisteredStatusNotifierItems")
+	if call.Err != nil {
+		fmt.Fprintf(os.Stderr, "[tray] read items from watcher %s: %v\n", owner, call.Err)
+		return 0
+	}
+	if err := call.Store(&value); err != nil {
+		fmt.Fprintf(os.Stderr, "[tray] decode watcher items from %s: %v\n", owner, err)
+		return 0
+	}
+	var addresses []string
+	if err := value.Store(&addresses); err != nil {
+		fmt.Fprintf(os.Stderr, "[tray] decode watcher item list from %s: %v\n", owner, err)
+		return 0
+	}
+	registered := 0
+	for _, address := range addresses {
+		if s.trackExistingItem(address) {
+			registered++
+		}
+	}
+	return registered
+}
+
+func (s *Service) trackExistingItem(address string) bool {
+	ref, err := s.itemRefFromAddress(address)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[tray] invalid item address %q: %v\n", address, err)
+		return false
+	}
+	return s.trackResolvedItem(ref)
+}
+
+func (s *Service) trackResolvedItem(ref ItemRef) bool {
+	id := itemID(ref)
+	s.mu.RLock()
+	_, exists := s.refs[id]
+	_, loaded := s.items[id]
+	s.mu.RUnlock()
+	if exists {
+		if !loaded {
+			s.refreshItemAsync(id)
+		}
+		return false
+	}
+	if err := s.watchItem(ref); err != nil {
+		fmt.Fprintf(os.Stderr, "[tray] watch existing item %s: %v\n", id, err)
+	}
+	s.mu.Lock()
+	if _, exists := s.refs[id]; exists {
+		s.mu.Unlock()
+		return false
+	}
+	s.refs[id] = ref
+	s.mu.Unlock()
+	s.updateWatcherProperties(s.registeredItems())
+	s.mu.RLock()
+	conn := s.conn
+	ownsWatcher := s.ownsWatcher
+	s.mu.RUnlock()
+	if ownsWatcher && conn != nil {
+		_ = conn.Emit(watcherPath, watcherInterface+".StatusNotifierItemRegistered", itemAddress(ref))
+	}
+	if err := s.persistRefs(); err != nil {
+		fmt.Fprintf(os.Stderr, "[tray] persist registrations: %v\n", err)
+	}
+	s.refreshItemAsync(id)
+	return true
+}
+
+func (s *Service) itemRefFromAddress(address string) (ItemRef, error) {
+	service, path, err := itemAddressParts(address)
+	if err != nil {
+		return ItemRef{}, err
+	}
+	owner, err := s.nameOwner(service)
+	if err != nil {
+		return ItemRef{}, err
+	}
+	return ItemRef{Service: service, Owner: owner, Path: path}, nil
+}
+
+func itemAddressParts(address string) (string, dbus.ObjectPath, error) {
+	if strings.HasPrefix(address, "/") {
+		return "", "", fmt.Errorf("item address does not include a service")
+	}
+	service := address
+	path := dbus.ObjectPath("/StatusNotifierItem")
+	if separator := strings.IndexByte(address, '/'); separator >= 0 {
+		service = address[:separator]
+		path = dbus.ObjectPath(address[separator:])
+	}
+	if !dbusNameValid(service) || !path.IsValid() {
+		return "", "", fmt.Errorf("invalid service or object path")
+	}
+	return service, path, nil
 }
 
 func (s *Service) Close() error {
@@ -631,8 +804,26 @@ func (s *Service) signalLoop(ch chan *dbus.Signal) {
 				name, _ := signal.Body[0].(string)
 				owner, _ := signal.Body[1].(string)
 				newOwner, _ := signal.Body[2].(string)
+				if name == watcherName {
+					s.handleWatcherOwnerChanged(newOwner)
+					continue
+				}
 				if strings.HasPrefix(name, ":") && owner != "" && newOwner == "" {
 					s.removeOwner(name)
+				}
+				continue
+			}
+			if signal.Name == watcherInterface+".StatusNotifierItemRegistered" && len(signal.Body) > 0 {
+				address, _ := signal.Body[0].(string)
+				if s.isExistingWatcherSignal(signal.Sender) {
+					s.trackExistingItem(address)
+				}
+				continue
+			}
+			if signal.Name == watcherInterface+".StatusNotifierItemUnregistered" && len(signal.Body) > 0 {
+				address, _ := signal.Body[0].(string)
+				if s.isExistingWatcherSignal(signal.Sender) {
+					s.removeExistingItem(address)
 				}
 				continue
 			}
@@ -654,6 +845,98 @@ func (s *Service) signalLoop(ch chan *dbus.Signal) {
 				}
 			}
 		}
+	}
+}
+
+func (s *Service) isExistingWatcherSignal(sender string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return !s.ownsWatcher && sender != "" && sender == s.watcherOwner
+}
+
+func (s *Service) handleWatcherOwnerChanged(newOwner string) {
+	s.mu.RLock()
+	conn := s.conn
+	currentOwner := s.watcherOwner
+	ownsWatcher := s.ownsWatcher
+	closed := s.closed
+	s.mu.RUnlock()
+	if conn == nil || closed {
+		return
+	}
+	self := string(conn.Names()[0])
+	if newOwner == self {
+		if ownsWatcher && currentOwner == self {
+			return
+		}
+		s.mu.Lock()
+		s.ownsWatcher = true
+		s.watcherOwner = self
+		s.status = "available"
+		s.mu.Unlock()
+		s.registerAsHost(watcherName)
+		s.updateWatcherProperties(s.registeredItems())
+		for _, address := range s.registeredItems() {
+			_ = conn.Emit(watcherPath, watcherInterface+".StatusNotifierItemRegistered", address)
+		}
+		s.restoreItems()
+		return
+	}
+	if newOwner == "" {
+		reply, err := conn.RequestName(watcherName, dbus.NameFlagDoNotQueue)
+		if err == nil && reply == dbus.RequestNameReplyPrimaryOwner {
+			s.handleWatcherOwnerChanged(self)
+			return
+		}
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "[tray] acquire watcher name: %v\n", err)
+		}
+		newOwner, err = s.nameOwner(watcherName)
+		if err != nil {
+			return
+		}
+	}
+	if newOwner == "" {
+		return
+	}
+	if currentOwner != "" && currentOwner != self && currentOwner != newOwner {
+		_ = conn.RemoveMatchSignal(
+			dbus.WithMatchSender(currentOwner),
+			dbus.WithMatchObjectPath(watcherPath),
+			dbus.WithMatchInterface(watcherInterface),
+		)
+	}
+	if err := s.watchWatcher(newOwner); err != nil {
+		fmt.Fprintf(os.Stderr, "[tray] watch existing watcher: %v\n", err)
+	}
+	s.mu.Lock()
+	s.ownsWatcher = false
+	s.watcherOwner = newOwner
+	s.status = "available"
+	s.mu.Unlock()
+	s.registerAsHost(newOwner)
+	s.syncWatcherItems(newOwner)
+}
+
+func (s *Service) removeExistingItem(address string) {
+	service, path, err := itemAddressParts(address)
+	if err != nil {
+		return
+	}
+	id := service + string(path)
+	s.mu.RLock()
+	if _, exists := s.refs[id]; !exists {
+		for candidate, ref := range s.refs {
+			if ref.Path == path && (ref.Service == service || ref.Owner == service) {
+				id = candidate
+				break
+			}
+		}
+	}
+	_, exists := s.refs[id]
+	s.mu.RUnlock()
+	if exists {
+		s.removeItem(id, true)
 	}
 }
 

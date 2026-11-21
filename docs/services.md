@@ -121,10 +121,12 @@ axctl can host the `org.kde.StatusNotifierWatcher` D-Bus watcher and register
 itself as a host. It exports the watcher and reports a host as registered
 before claiming the D-Bus name, so applications can register immediately.
 `IsStatusNotifierHostRegistered` remains true because axctl handles registered
-items itself. Set `AXCTL_TRAY=0` to disable it. If another watcher already
-owns the name, the tray service enters a conflict state. `Tray.Status` reports
-`available`, `disabled`, `conflict: ...`, or `unavailable: ...`; before startup
-it reports `stopped`.
+items itself. If another watcher owns the name, axctl leaves it in place,
+registers as an additional host, and imports its registered-item list. If that
+watcher rejects additional hosts, axctl still reads its list and listens for
+item changes when those interfaces are available. Set `AXCTL_TRAY=0` to disable
+the tray service. `Tray.Status` reports `available`, `disabled`, `conflict: ...`,
+`unavailable: ...`, or `stopped` before service startup.
 
 `Tray.List` returns StatusNotifierItem metadata: ID, service, object path,
 category, title, status, icon, tooltip, and menu reference. The

@@ -93,6 +93,36 @@ func (f *fakeStatusNotifierItem) Activate(_ int32, _ int32) *dbus.Error {
 	return nil
 }
 
+type fakeStatusNotifierWatcher struct {
+	items       []string
+	rejectHosts bool
+	hosts       atomic.Int32
+}
+
+func (w *fakeStatusNotifierWatcher) RegisterStatusNotifierItem(_ dbus.Sender, _ string) *dbus.Error {
+	return nil
+}
+
+func (w *fakeStatusNotifierWatcher) RegisterStatusNotifierHost(_ dbus.Sender, _ string) *dbus.Error {
+	w.hosts.Add(1)
+	if w.rejectHosts {
+		return dbus.MakeFailedError(fmt.Errorf("additional hosts are not supported"))
+	}
+	return nil
+}
+
+func (w *fakeStatusNotifierWatcher) IsStatusNotifierHostRegistered() (bool, *dbus.Error) {
+	return true, nil
+}
+
+func (w *fakeStatusNotifierWatcher) RegisteredStatusNotifierItems() ([]string, *dbus.Error) {
+	return w.items, nil
+}
+
+func (w *fakeStatusNotifierWatcher) ProtocolVersion() (int32, *dbus.Error) {
+	return 0, nil
+}
+
 func findItemByTitle(items []Item, title string) (Item, bool) {
 	for _, item := range items {
 		if item.Title == title {
@@ -117,6 +147,174 @@ func waitForItemByTitle(t *testing.T, service *Service, title string) Item {
 		case <-timeout.C:
 			t.Fatalf("tray item %q was not loaded", title)
 		}
+	}
+}
+
+func waitForItemRemoval(t *testing.T, service *Service, id string) {
+	t.Helper()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	timeout := time.NewTimer(3 * time.Second)
+	defer timeout.Stop()
+	for {
+		found := false
+		for _, item := range service.List() {
+			if item.ID == id {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return
+		}
+		select {
+		case <-ticker.C:
+		case <-timeout.C:
+			t.Fatalf("tray item %q was not removed", id)
+		}
+	}
+}
+
+func waitForWatcherOwner(t *testing.T, conn *dbus.Conn, want string) {
+	t.Helper()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	timeout := time.NewTimer(3 * time.Second)
+	defer timeout.Stop()
+	for {
+		call := conn.BusObject().Call("org.freedesktop.DBus.GetNameOwner", 0, watcherName)
+		var owner string
+		if call.Err == nil && call.Store(&owner) == nil && owner == want {
+			return
+		}
+		select {
+		case <-ticker.C:
+		case <-timeout.C:
+			t.Fatalf("StatusNotifier watcher owner did not become %q", want)
+		}
+	}
+}
+
+func TestStatusNotifierWatcherAttachesToExistingHost(t *testing.T) {
+	t.Setenv("AXCTL_TRAY", "1")
+	tempDir := t.TempDir()
+	t.Setenv("XDG_RUNTIME_DIR", filepath.Join(tempDir, "runtime"))
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(tempDir, "cache"))
+
+	watcherConn, err := dbus.ConnectSessionBus()
+	if err != nil {
+		t.Skipf("session D-Bus is unavailable: %v", err)
+	}
+	defer watcherConn.Close()
+	itemConn, err := dbus.ConnectSessionBus()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer itemConn.Close()
+	itemPath := dbus.ObjectPath("/StatusNotifierItem")
+	if err := itemConn.Export(&fakeStatusNotifierItem{}, itemPath, itemInterface); err != nil {
+		t.Fatal(err)
+	}
+	_, err = prop.Export(itemConn, itemPath, prop.Map{itemInterface: {
+		"Category": &prop.Prop{Value: "ApplicationStatus", Emit: prop.EmitTrue},
+		"Id":       &prop.Prop{Value: "external-item", Emit: prop.EmitTrue},
+		"Title":    &prop.Prop{Value: "External Item", Emit: prop.EmitTrue},
+		"Status":   &prop.Prop{Value: "Active", Emit: prop.EmitTrue},
+		"IconName": &prop.Prop{Value: "external-icon", Emit: prop.EmitTrue},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	itemAddress := string(itemConn.Names()[0]) + string(itemPath)
+	watcher := &fakeStatusNotifierWatcher{items: []string{itemAddress}, rejectHosts: true}
+	if err := watcherConn.Export(watcher, watcherPath, watcherInterface); err != nil {
+		t.Fatal(err)
+	}
+	_, err = prop.Export(watcherConn, watcherPath, prop.Map{watcherInterface: {
+		"RegisteredStatusNotifierItems":  &prop.Prop{Value: watcher.items, Emit: prop.EmitTrue},
+		"IsStatusNotifierHostRegistered": &prop.Prop{Value: true, Emit: prop.EmitTrue},
+		"ProtocolVersion":                &prop.Prop{Value: int32(0), Emit: prop.EmitConst},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reply, err := watcherConn.RequestName(watcherName, dbus.NameFlagDoNotQueue)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reply != dbus.RequestNameReplyPrimaryOwner {
+		t.Skipf("another StatusNotifier watcher owns %s", watcherName)
+	}
+
+	service, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close()
+	if service.Status() != "available" {
+		t.Fatalf("tray status = %q, want available", service.Status())
+	}
+	if watcher.hosts.Load() != 1 {
+		t.Fatalf("existing watcher received %d host registrations, want 1", watcher.hosts.Load())
+	}
+	item := waitForItemByTitle(t, service, "External Item")
+	if item.Service != string(itemConn.Names()[0]) {
+		t.Fatalf("item service = %q, want %q", item.Service, itemConn.Names()[0])
+	}
+
+	livePath := dbus.ObjectPath("/LiveStatusNotifierItem")
+	if err := itemConn.Export(&fakeStatusNotifierItem{}, livePath, itemInterface); err != nil {
+		t.Fatal(err)
+	}
+	_, err = prop.Export(itemConn, livePath, prop.Map{itemInterface: {
+		"Category": &prop.Prop{Value: "ApplicationStatus", Emit: prop.EmitTrue},
+		"Id":       &prop.Prop{Value: "live-item", Emit: prop.EmitTrue},
+		"Title":    &prop.Prop{Value: "Live Item", Emit: prop.EmitTrue},
+		"Status":   &prop.Prop{Value: "Active", Emit: prop.EmitTrue},
+		"IconName": &prop.Prop{Value: "live-icon", Emit: prop.EmitTrue},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	liveAddress := string(itemConn.Names()[0]) + string(livePath)
+	if err := watcherConn.Emit(watcherPath, watcherInterface+".StatusNotifierItemRegistered", liveAddress); err != nil {
+		t.Fatal(err)
+	}
+	liveItem := waitForItemByTitle(t, service, "Live Item")
+	if err := watcherConn.Emit(watcherPath, watcherInterface+".StatusNotifierItemUnregistered", itemAddress); err != nil {
+		t.Fatal(err)
+	}
+	waitForItemRemoval(t, service, item.ID)
+
+	if err := watcherConn.Close(); err != nil {
+		t.Fatal(err)
+	}
+	service.mu.RLock()
+	ownName := string(service.conn.Names()[0])
+	service.mu.RUnlock()
+	waitForWatcherOwner(t, itemConn, ownName)
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	timeout := time.NewTimer(3 * time.Second)
+	defer timeout.Stop()
+	for {
+		service.mu.RLock()
+		ownsWatcher := service.ownsWatcher
+		service.mu.RUnlock()
+		if ownsWatcher {
+			break
+		}
+		select {
+		case <-ticker.C:
+		case <-timeout.C:
+			t.Fatal("axctl did not take over the watcher name")
+		}
+	}
+	if item, ok := findItemByTitle(service.List(), "Live Item"); !ok || item.ID != liveItem.ID {
+		t.Fatalf("existing item after watcher takeover = %#v", service.List())
 	}
 }
 
