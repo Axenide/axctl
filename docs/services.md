@@ -149,6 +149,7 @@ format, converted to PNG, and cached in `$XDG_CACHE_HOME/axctl/tray` or
 whose owning applications are still running; stale references are discarded.
 At startup, axctl also scans live session-bus objects for StatusNotifierItems
 that are still published but are not registered with the active watcher.
+`Tray.Rescan` repeats this scan and reports the number of newly tracked items.
 The tray RPC API has no CLI subcommands; use the methods described in the
 [IPC API](ipc-api.md).
 

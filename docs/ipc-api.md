@@ -352,6 +352,7 @@ service and D-Bus object path.
 | Method | Parameters | Result/semantics |
 |---|---|---|
 | `Tray.List` | `{}` | `TrayItem[]` of registered StatusNotifier items. |
+| `Tray.Rescan` | `{}` | `{ "registered": number }`; scans live session-bus objects and tracks StatusNotifierItems not already known. |
 | `Tray.Status` | `{}` | `{ "status": string }`; values include `available`, `disabled`, `conflict: <reason>`, `unavailable: <reason>`, and `stopped` before service startup. If the service is absent, the result is `unavailable`. |
 | `Tray.Activate` / `Tray.SecondaryActivate` / `Tray.ContextMenu` | `{ "id": string, "x"?: int, "y"?: int }` | Invoke the item's native method. |
 | `Tray.Scroll` | `{ "id": string, "delta": int, "orientation"?: string }` | `orientation` is `horizontal` or, by default, `vertical`. |

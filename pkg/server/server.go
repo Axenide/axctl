@@ -1917,6 +1917,16 @@ func (s *Server) handleConnection(conn net.Conn) {
 				break
 			}
 			result = s.tray.List()
+		case "Tray.Rescan":
+			if s.tray == nil {
+				err = fmt.Errorf("tray service is unavailable")
+				break
+			}
+			var registered int
+			registered, err = s.tray.Rescan()
+			if err == nil {
+				result = map[string]int{"registered": registered}
+			}
 		case "Tray.Status":
 			if s.tray == nil {
 				result = map[string]string{"status": "unavailable"}
